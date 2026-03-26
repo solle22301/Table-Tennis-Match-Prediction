@@ -1,0 +1,451 @@
+'''
+🏓 Table Tennis Match Prediction
+
+Autore: Alessandro Sollevanti  
+Data: Gennaio 2026  
+Corso: Machine Learning
+
+## Obiettivo del Progetto:
+Questo progetto sviluppa un modello di Machine Learning per predire il vincitore 
+di partite di tennis tavolo prima dell'inizio del match, utilizzando dati storici 
+e ranking ELO dei giocatori.
+
+## Pipeline Completa del Progetto:
+
+###  DATA LOADING & PREPROCESSING (Fasi 1-3)
+1. Caricamento Dataset
+   - Import file partite (9415 match TT Elite Series)
+   - Import ranking ELO (413 giocatori, rating 216-1520)
+   - Validazione colonne obbligatorie e ordinamento temporale
+
+2. Preprocessing
+   - Normalizzazione nomi (rimozione accenti, caratteri speciali)
+   - Risoluzione duplicati nel ranking (mantiene ELO più alto)
+   - Inversione formato: "Cognome Nome" → "Nome Cognome"
+   - Merge LEFT JOIN per associare ELO a ogni giocatore
+
+3. Feature Engineering
+   - Creazione 11 features con rolling window (zero data leakage)
+   - Categorie: Ranking (2), Win Rate (2), Head-to-Head (3), Momentum (2), Volatilità (2)
+   - Pulizia finale: rimozione partite con ELO mancante
+
+###  EXPLORATORY DATA ANALYSIS & OUTLIER DETECTION (Fase 4)
+4. Analisi Esplorativa + Outlier Detection
+   - Bilanciamento target (distribuzione vittorie P1 vs P2)
+   - Distribuzione ELO (boxplot, identificazione outliers con IQR)
+   - Relazione ELO difference vs probabilità vittoria
+   - Outlier Detection (Sez. 4.6): Studentized Residuals, Leverage, DFFITS
+   - Rimozione sample anomali per migliorare robustezza modello
+   - Nota: Analisi su dataset completo, pulizia prima dello split
+
+###  TRAIN/TEST SPLIT & FEATURE ANALYSIS (Fasi 5-6)
+5. Split Temporale
+   - Divisione 80/20 basata su ordine cronologico (non random)
+   - Previene data leakage: train su passato, test su futuro
+   - Test set viene "congelato" fino alla valutazione finale
+   - Definizione lista 11 features per modelli
+
+6. Analisi Correlazioni (SOLO su Train Set)
+   - Matrice di correlazione Pearson (features + target)
+   - VIF (Variance Inflation Factor) per rilevare multicollinearità
+   - Identificazione features ridondanti o problematiche
+   - Nota: Analisi SOLO su train per evitare data leakage
+
+###  MODELING & VALIDATION (Fasi 7-10)
+7. Preparazione Dati
+   - Creazione target binario (1 = P1 vince, 0 = P2 vince)
+   - Normalizzazione con StandardScaler (fit SOLO su train)
+   - Separazione X_train, y_train, X_test, y_test
+
+8. Training Modelli Base
+   - Logistic Regression (baseline lineare interpretabile)
+   - Random Forest (ensemble tree-based, feature importance)
+   - Neural Network con Early Stopping (riduce overfitting)
+
+9. Cross-Validation (5-Fold su Train Set)
+   - Valutazione robusta di ogni modello senza toccare test set
+   - Stima media e deviazione standard delle performance
+   - Selezione miglior modello basata su CV score medio
+   - Nota: Test set ancora NON toccato
+
+10. Hyperparameter Tuning (Opzionale)
+    - GridSearchCV con inner CV sul miglior modello (train only)
+    - Random Forest: n_estimators, max_depth, min_samples_split
+    - Logistic Regression: C, penalty (L1/L2 regularization)
+    - Modello finale ottimizzato pronto per test
+
+###  FINAL EVALUATION (Fasi 11-12)
+11. Evaluation Finale su Test Set
+    - Metriche: Accuracy, Precision, Recall, F1-Score
+    - Confusion Matrix del modello finale
+    - Confronto con baseline e CV scores
+    - Nota: Test set toccato UNA SOLA VOLTA qui
+
+12. Analisi Avanzata (Visualizzazioni Finali)
+    - ROC Curve + AUC per tutti i modelli su test set
+    - Feature Importance (Random Forest) con interpretazione
+    - Analisi errori e pattern dalla Confusion Matrix
+
+###  OUTPUT FINALE
+- Riepilogo completo: dataset size, outliers rimossi, features, modelli testati
+- Confronto CV scores vs test score (verifica overfitting)
+- Salvataggio grafici (10+ visualizzazioni)
+- Report dettagliato performance
+
+## Note Tecniche:
+- Zero Data Leakage: Rolling window per features, split temporale, analisi solo su train
+- Outlier Removal: Studentized residuals (Sez. 4.6 appunti) per dataset pulito
+- Riproducibilità: Seed fisso (42) per tutti i modelli
+- Scalabilità: Pipeline modulare con src/ packages separati
+- Test Set Discipline: Toccato una sola volta alla fine (Fase 11)
+'''
+
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import moduli del progetto
+from src.data_loader import load_data
+from src.preprocessing import normalize_and_merge
+from src.feature_engineering import create_features
+from src.exploratory_analysis import run_eda, detect_outliers, remove_outliers
+from src.modeling import train_test_split_temporal, prepare_data, train_models, hyperparameter_tuning
+from src.evaluation import evaluate_models, plot_confusion_matrix
+from src.advanced_analysis import (plot_correlation_matrix, calculate_vif, 
+                                   plot_roc_curves, analyze_feature_importance,
+                                   perform_cross_validation)
+
+def main():
+    # Header progetto
+    print("=" * 80)
+    print("TABLE TENNIS MATCH PREDICTION")
+    print("Progetto Machine Learning - Alessandro Sollevanti")
+    print("=" * 80)
+    
+    # -------------------------------------------------------------------------
+    # FASE 1: Caricamento Dataset
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 1: CARICAMENTO DATASET")
+    print("=" * 80)
+    
+    matches_file = os.path.join('datasets', 'TT_Elite_COMBINED_9415_matches.csv')
+    ranking_file = os.path.join('datasets', 'RANKING-TT-ELITE-SERIES.csv')
+    df_matches, df_ranking = load_data(matches_file, ranking_file)
+    
+    # -------------------------------------------------------------------------
+    # FASE 2: Preprocessing (Normalizzazione Nomi + Merge)
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 2: PREPROCESSING")
+    print("=" * 80)
+    
+    df_merged = normalize_and_merge(df_matches, df_ranking)
+    
+    # -------------------------------------------------------------------------
+    # FASE 3: Feature Engineering
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 3: FEATURE ENGINEERING")
+    print("=" * 80)
+    
+    df_features = create_features(df_merged)
+    
+    # Pulizia dataset finale
+    df_clean = df_features.dropna(subset=['player_1_elo', 'player_2_elo']).reset_index(drop=True)
+    print(f"\nPulizia dataset:")
+    print(f"   Righe con ELO mancante rimosse: {len(df_features) - len(df_clean)}")
+    print(f"   Dataset pre-outlier removal: {len(df_clean)} partite")
+    
+    # -------------------------------------------------------------------------
+    # FASE 4: Exploratory Data Analysis + Outlier Detection
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 4: EXPLORATORY DATA ANALYSIS + OUTLIER DETECTION")
+    print("=" * 80)
+    
+    # EDA standard
+    baseline = run_eda(df_clean)
+    
+    # Outlier Detection (Sezione 4.6 Appunti - parte dell'EDA)
+    print("\n" + "-" * 80)
+    print("OUTLIER DETECTION (integrato nell'EDA)")
+    print("-" * 80)
+    
+    # Definizione features per outlier detection
+    feature_cols_outlier = [
+        'player_1_elo', 'elo_diff',
+        'p1_win_rate_last5', 'p2_win_rate_last5',
+        'h2h_p1_wins', 'h2h_p2_wins', 'h2h_ratio',
+        'p1_streak', 'p2_streak',
+        'p1_form_volatility', 'p2_form_volatility'
+    ]
+    
+    # Crea target temporaneo se non esiste
+    if 'player_1_wins' not in df_clean.columns:
+        df_clean['player_1_wins'] = (df_clean['winner'] == df_clean['player_1']).astype(int)
+    
+    # Estrai features e target per outlier detection
+    X_outlier = df_clean[feature_cols_outlier].fillna(0).values
+    y_outlier = df_clean['player_1_wins'].values
+    
+    # Rileva outliers
+    outlier_result = detect_outliers(
+        X_outlier, 
+        y_outlier, 
+        feature_names=feature_cols_outlier,
+        verbose=True
+    )
+    
+    # Rimuovi outliers
+    df_clean = remove_outliers(df_clean, outlier_result['outlier_indices'], verbose=True)
+    
+    print(f"\n✓ Dataset finale pulito: {len(df_clean)} partite")
+    
+    # -------------------------------------------------------------------------
+    # FASE 5: Split Temporale
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 5: SPLIT TEMPORALE")
+    print("=" * 80)
+    
+    train, test = train_test_split_temporal(df_clean, test_size=0.2)
+    
+    # Definizione features (11 totali - VERSIONE CORRETTA)
+    feature_cols = [
+        # Ranking ELO (2 features - RIMOSSA player_2_elo per VIF infinito)
+        'player_1_elo',  # Livello assoluto P1
+        'elo_diff',      # Differenza ELO (TOP FEATURE - corr +0.26)
+        # NOTA: player_2_elo rimossa (ridondante: p2_elo = p1_elo - elo_diff)
+        
+        # Win Rate (2 features - solo last5, più predittivo)
+        'p1_win_rate_last5', 'p2_win_rate_last5',
+        
+        # Head-to-Head (3 features - aggiunto ratio)
+        'h2h_p1_wins', 'h2h_p2_wins', 'h2h_ratio',
+        
+        # Momentum (2 features)
+        'p1_streak', 'p2_streak',
+        
+        # Volatilità (2 features)
+        'p1_form_volatility', 'p2_form_volatility'
+    ]
+    
+    print(f"\nFeatures selezionate: {len(feature_cols)} (ottimizzato da 16)")
+    print("   Rimosse 5 features ridondanti o deboli:")
+    print("     • elo_sum (corr 0.01)")
+    print("     • player_2_elo (VIF infinito - ridondante con p1_elo e elo_diff)")
+    print("     • p1/p2_win_rate_overall (VIF 17)")
+    print("     • p1/p2_recent_form (VIF 15)")
+    print("\n   Categorie finali:")
+    print("     • ELO (2): player_1_elo, elo_diff")
+    print("     • Win Rate (2): p1/p2_win_rate_last5")
+    print("     • H2H (3): p1/p2_wins, ratio")
+    print("     • Momentum (2): p1/p2_streak")
+    print("     • Volatilità (2): p1/p2_form_volatility")
+    
+    # Verifica e gestione valori mancanti
+    print(f"\nVerifica valori mancanti nelle features:")
+    nan_found = False
+    for col in feature_cols:
+        missing = train[col].isna().sum()
+        if missing > 0:
+            print(f"  ⚠️  {col}: {missing} NaN ({missing/len(train)*100:.1f}%)")
+            nan_found = True
+    
+    if nan_found:
+        print(f"\n⚠️  Imputazione NaN con 0 (default per features rolling window)")
+        train[feature_cols] = train[feature_cols].fillna(0)
+        test[feature_cols] = test[feature_cols].fillna(0)
+        print(f"✓ Imputazione completata")
+    else:
+        print(f"✓ Nessun valore mancante trovato")
+
+    # -------------------------------------------------------------------------
+    # FASE 6: Analisi Correlazioni (SOLO SU TRAIN SET)
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 6: ANALISI CORRELAZIONI (TRAIN SET)")
+    print("=" * 80)
+    print("\n⚠️  IMPORTANTE: Analisi eseguita SOLO su train set per evitare data leakage")
+    
+    # Analisi SOLO su train
+    corr_matrix = plot_correlation_matrix(train, feature_cols)
+    vif_data = calculate_vif(train, feature_cols)
+    
+    # -------------------------------------------------------------------------
+    # FASE 7: Preparazione Dati
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 7: PREPARAZIONE DATI")
+    print("=" * 80)
+    
+    X_train, y_train, X_test, y_test, scaler = prepare_data(train, test, feature_cols)
+    
+    # -------------------------------------------------------------------------
+    # FASE 8: Training Modelli Base
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 8: TRAINING MODELLI BASE")
+    print("=" * 80)
+    
+    models = train_models(X_train, y_train)
+    
+    # -------------------------------------------------------------------------
+    # FASE 9: Cross-Validation (5-Fold su Train Set)
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 9: CROSS-VALIDATION (TRAIN SET)")
+    print("=" * 80)
+    print("\n📊 Valutazione robusta dei modelli tramite 5-Fold CV")
+    print("⚠️  Test set ancora NON utilizzato\n")
+
+    # CV per ogni modello
+    cv_results = {}
+    for name, model in models.items():
+        print(f"\nCross-Validation: {name}...")
+        cv_scores = perform_cross_validation(model, X_train, y_train, cv=5)
+        cv_results[name] = cv_scores['test_accuracy'].mean()
+
+    # Selezione miglior modello basato su CV
+    best_model_name = max(cv_results, key=cv_results.get)
+    best_model = models[best_model_name]
+
+    print("\n" + "=" * 80)
+    print(f"✓ MIGLIOR MODELLO (basato su CV): {best_model_name}")
+    print(f"  CV Score medio: {cv_results[best_model_name]:.4f}")
+    print("=" * 80)
+
+    # -------------------------------------------------------------------------
+    # FASE 10: Hyperparameter Tuning (Opzionale)
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 10: HYPERPARAMETER TUNING (OPZIONALE)")
+    print("=" * 80)
+    
+    print("\nVuoi eseguire hyperparameter tuning sul miglior modello?")
+    print("Nota: GridSearchCV con inner CV, può richiedere diversi minuti")
+    response = input("Premi ENTER per saltare, 'si' per continuare: ").lower()
+    
+    if response == 'si':
+        best_model_tuned = hyperparameter_tuning(X_train, y_train, best_model_name)
+        
+        if best_model_tuned is not None:
+            # Sostituisci modello con versione ottimizzata
+            models[best_model_name] = best_model_tuned
+            best_model = best_model_tuned
+            print(f"\n✓ Modello {best_model_name} ottimizzato e aggiornato")
+    else:
+        print("\n⏭️  Hyperparameter tuning saltato - uso modello base")
+    
+    # -------------------------------------------------------------------------
+    # FASE 11: Evaluation Finale su Test Set
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 11: EVALUATION FINALE SU TEST SET")
+    print("=" * 80)
+    print("\n🎯 ATTENZIONE: Test set utilizzato per la PRIMA e UNICA volta\n")
+    
+    # Valuta TUTTI i modelli sul test set
+    results, _ = evaluate_models(models, X_test, y_test)
+    
+    # Confusion matrix del modello finale
+    plot_confusion_matrix(best_model, X_test, y_test, best_model_name)
+    
+    # -------------------------------------------------------------------------
+    # FASE 12: Analisi Avanzata (Visualizzazioni Finali)
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 12: ANALISI AVANZATA")
+    print("=" * 80)
+    
+    # ROC Curves per tutti i modelli
+    plot_roc_curves(models, X_test, y_test)
+    
+    # Feature importance (solo Random Forest)
+    if 'Random Forest' in best_model_name:
+        importance_df = analyze_feature_importance(best_model, feature_cols)
+    else:
+        print(f"\nFeature importance non disponibile per {best_model_name}")
+        print("(disponibile solo per Random Forest)")
+
+
+    
+    # -------------------------------------------------------------------------
+    # RIEPILOGO FINALE
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("PROGETTO COMPLETATO")
+    print("=" * 80)
+    
+    final_best_accuracy = results[best_model_name]
+    
+    print("\n📊 RIEPILOGO RISULTATI:")
+    print("-" * 80)
+    print(f"   Dataset finale: {len(df_clean)} partite")
+    print(f"   Outliers rimossi: {outlier_result['summary']['n_outliers']}")
+    print(f"   Features utilizzate: {len(feature_cols)}")
+    print(f"   Modelli testati: {len(models)}")
+    print(f"\n   Baseline accuracy: {baseline:.2f}% (predizione casuale)")
+    print(f"   Miglior modello: {best_model_name}")
+    print(f"   CV Score (train): {cv_results[best_model_name]:.4f}")
+    print(f"   Test Accuracy: {final_best_accuracy:.4f} ({final_best_accuracy*100:.2f}%)")
+    print(f"   Miglioramento vs baseline: +{(final_best_accuracy - baseline/100)*100:.2f}%")
+    
+    # Verifica overfitting
+    gap = abs(cv_results[best_model_name] - final_best_accuracy)
+    if gap < 0.02:
+        print(f"\n   ✓ Gap CV-Test: {gap:.4f} (modello generalizza bene)")
+    else:
+        print(f"\n   ⚠️  Gap CV-Test: {gap:.4f} (possibile overfitting)")
+    
+    print("-" * 80)
+    
+    print("\n📊 GRAFICI SALVATI:")
+    print("   • target_balance.png - Bilanciamento classi")
+    print("   • elo_distributions.png - Distribuzione ELO")
+    print("   • elo_diff_vs_win.png - Relazione ELO vs vittoria")
+    print("   • correlation_matrix.png - Matrice correlazioni (train set)")
+    print("   • confusion_matrix_{}.png - Matrice confusione".format(best_model_name.replace(' ', '_')))
+    print("   • roc_curves.png - ROC curves confronto modelli")
+    if 'Random Forest' in best_model_name:
+        print("   • feature_importance.png - Importanza features")
+    
+    print("\n✓ Pipeline completata con successo!")
+    print("=" * 80)
+
+     # -------------------------------------------------------------------------
+    # FASE 13: SALVATAGGIO MODELLI
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("FASE 13: SALVATAGGIO MODELLI")
+    print("=" * 80)
+
+    import joblib
+
+    # Crea cartella models se non esiste
+    os.makedirs('models', exist_ok=True)
+
+    # Salva tutti i modelli addestrati
+    print("\n💾 Salvataggio modelli in cartella models/...")
+
+    joblib.dump(models['Logistic Regression'], 'models/logistic_regression.pkl')
+    print("   ✅ logistic_regression.pkl")
+
+    joblib.dump(models['Random Forest'], 'models/random_forest.pkl')
+    print("   ✅ random_forest.pkl")
+
+    joblib.dump(models['Neural Network'], 'models/neural_network.pkl')
+    print("   ✅ neural_network.pkl")
+
+    joblib.dump(scaler, 'models/scaler.pkl')
+    print("   ✅ scaler.pkl")
+
+    print("\n✓ Modelli salvati con successo!")
+    print("=" * 80)
+    print("\n🎯 Ora puoi usare: python predict_match.py")
+
+
+
+if __name__ == '__main__':
+    main()
