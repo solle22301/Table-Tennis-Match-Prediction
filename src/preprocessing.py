@@ -1,80 +1,112 @@
 """
-Modulo per la normalizzazione dei nomi e merge dei dataset.
+Modulo per la Normalizzazione Testuale e l'Unione dei Dataset (Merge).
 
-IMPORTANTE: Il ranking è già stato pre-processato in formato "Nome Cognome"
-quindi non serve più inversione!
+Questo modulo si occupa di allineare i dati testuali tra lo storico partite 
+e il ranking ufficiale.
+
+IMPORTANTE: Il dataset del ranking è già stato pre-processato alla fonte 
+e standardizzato nel formato "Nome Cognome". Non è quindi necessario 
+applicare logiche di inversione stringhe durante il merge.
 """
 
 import pandas as pd
 import unicodedata
 
-def clean_name(name):
-    """
-    Pulisce un nome rimuovendo accenti e caratteri speciali.
-    """
-    if pd.isna(name):
-        return name
-    
-    # Rimozione accenti
-    name = ''.join(c for c in unicodedata.normalize('NFD', name)
-                   if unicodedata.category(c) != 'Mn')
-    
-    # Rimozione caratteri speciali
-    name = name.replace('"', '').replace(',', '').replace('.', '').replace('-', ' ')
-    name = ' '.join(name.split())  # Normalizza spazi
-    
-    return name.strip()
+# ==============================================================================
+# 1. NORMALIZZAZIONE TESTUALE
+# ==============================================================================
 
-def normalize_and_merge(df_matches, df_ranking):
+def normalize_player_name(raw_name):
     """
-    Normalizza i nomi e unisce i dataset.
-    NOTA: Nessuna inversione necessaria, entrambi usano formato "Nome Cognome"
+    Standardizza una stringa di testo rimuovendo accenti, punteggiatura 
+    e spazi anomali. Garantisce che varianti come "Michał" e "Michal" 
+    vengano riconosciute come la stessa persona durante il join.
+    """
+    if pd.isna(raw_name):
+        return raw_name
+    
+    # 1. Rimozione segni diacritici (accenti, cediglie, ecc.) tramite decomposizione Unicode
+    normalized_string = ''.join(char for char in unicodedata.normalize('NFD', raw_name)
+                                if unicodedata.category(char) != 'Mn')
+    
+    # 2. Pulizia punteggiatura e caratteri speciali
+    normalized_string = normalized_string.replace('"', '').replace(',', '').replace('.', '').replace('-', ' ')
+    
+    # 3. Normalizzazione spaziature (rimuove spazi multipli)
+    normalized_string = ' '.join(normalized_string.split())
+    
+    return normalized_string.strip()
+
+
+# ==============================================================================
+# 2. MERGE DEI DATASET
+# ==============================================================================
+
+def normalize_and_merge(matches_dataset, ranking_dataset):
+    """
+    Applica la normalizzazione a entrambi i dataset ed esegue una LEFT JOIN
+    per associare il rating ELO a ciascun giocatore dello storico partite.
     """
     print("\n" + "=" * 80)
-    print("NORMALIZZAZIONE E MERGE")
+    print("FASE 2: NORMALIZZAZIONE NOMI E MERGE DATASET")
     print("=" * 80)
     
-    # STEP 1: Pulizia nomi
-    print("\nSTEP 1: Pulizia nomi...")
-    df_matches['player_1_clean'] = df_matches['player_1'].apply(clean_name)
-    df_matches['player_2_clean'] = df_matches['player_2'].apply(clean_name)
-    df_ranking['Nome_Clean'] = df_ranking['Nome Giocatore'].apply(clean_name)
-    print("✓ Completata")
+    # -------------------------------------------------------------------------
+    # Step 1: Normalizzazione delle colonne chiave
+    # -------------------------------------------------------------------------
+    print("\nSTEP 1: Pulizia e standardizzazione dei nomi...")
+    matches_dataset['player_1_clean'] = matches_dataset['player_1'].apply(normalize_player_name)
+    matches_dataset['player_2_clean'] = matches_dataset['player_2'].apply(normalize_player_name)
+    ranking_dataset['normalized_name'] = ranking_dataset['Nome Giocatore'].apply(normalize_player_name)
+    print("   ✓ Normalizzazione completata")
     
-    # STEP 2: Risoluzione duplicati ranking
-    print("\nSTEP 2: Risoluzione duplicati...")
-    duplicates = df_ranking['Nome_Clean'].duplicated().sum()
-    print(f"   Duplicati: {duplicates}")
+    # -------------------------------------------------------------------------
+    # Step 2: Risoluzione Duplicati nel Ranking
+    # -------------------------------------------------------------------------
+    # Per evitare di moltiplicare le righe durante la JOIN a causa di omonimie 
+    # o doppi inserimenti nel ranking ufficiale, forziamo l'univocità.
+    print("\nSTEP 2: Controllo e risoluzione duplicati nel ranking...")
+    duplicate_count = ranking_dataset['normalized_name'].duplicated().sum()
+    print(f"   Anomalie (Giocatori duplicati trovati): {duplicate_count}")
     
-    df_ranking_clean = (df_ranking
-                       .sort_values('Rating ELO', ascending=False)
-                       .drop_duplicates('Nome_Clean', keep='first'))
+    # In caso di duplicato, manteniamo il record con il Rating ELO più alto
+    ranking_clean_dataset = (ranking_dataset
+                             .sort_values('Rating ELO', ascending=False)
+                             .drop_duplicates('normalized_name', keep='first'))
     
-    # STEP 3: Merge LEFT JOIN
-    print("\nSTEP 3: Merge...")
-    df_merged = df_matches.merge(
-        df_ranking_clean[['Nome_Clean', 'Rating ELO']],
+    # -------------------------------------------------------------------------
+    # Step 3: Merge (LEFT JOIN sequenziale)
+    # -------------------------------------------------------------------------
+    print("\nSTEP 3: Esecuzione LEFT JOIN (Associazione ELO)...")
+    
+    # Associazione ELO per il Player 1
+    merged_dataset = matches_dataset.merge(
+        ranking_clean_dataset[['normalized_name', 'Rating ELO']],
         left_on='player_1_clean',
-        right_on='Nome_Clean',
+        right_on='normalized_name',
         how='left'
-    ).rename(columns={'Rating ELO': 'player_1_elo'}).drop(columns=['Nome_Clean'])
+    ).rename(columns={'Rating ELO': 'player_1_elo'}).drop(columns=['normalized_name'])
     
-    df_merged = df_merged.merge(
-        df_ranking_clean[['Nome_Clean', 'Rating ELO']],
+    # Associazione ELO per il Player 2
+    merged_dataset = merged_dataset.merge(
+        ranking_clean_dataset[['normalized_name', 'Rating ELO']],
         left_on='player_2_clean',
-        right_on='Nome_Clean',
+        right_on='normalized_name',
         how='left'
-    ).rename(columns={'Rating ELO': 'player_2_elo'}).drop(columns=['Nome_Clean'])
+    ).rename(columns={'Rating ELO': 'player_2_elo'}).drop(columns=['normalized_name'])
     
-    # Statistiche
-    p1_found = df_merged['player_1_elo'].notna().sum()
-    p2_found = df_merged['player_2_elo'].notna().sum()
-    both = ((df_merged['player_1_elo'].notna()) & 
-            (df_merged['player_2_elo'].notna())).sum()
+    # -------------------------------------------------------------------------
+    # Statistiche di Copertura (Match Rate)
+    # -------------------------------------------------------------------------
+    total_matches = len(merged_dataset)
+    p1_found_count = merged_dataset['player_1_elo'].notna().sum()
+    p2_found_count = merged_dataset['player_2_elo'].notna().sum()
+    matches_with_both_elos = ((merged_dataset['player_1_elo'].notna()) & 
+                              (merged_dataset['player_2_elo'].notna())).sum()
     
-    print(f"\n✓ Merge completato!")
-    print(f"   Player 1: {p1_found}/{len(df_merged)} ({p1_found/len(df_merged)*100:.1f}%)")
-    print(f"   Player 2: {p2_found}/{len(df_merged)} ({p2_found/len(df_merged)*100:.1f}%)")
-    print(f"   Entrambi: {both}/{len(df_merged)} ({both/len(df_merged)*100:.1f}%)")
+    print(f"\n✓ Operazione di Merge completata con successo!")
+    print(f"   Copertura ELO Player 1 : {p1_found_count}/{total_matches} ({p1_found_count/total_matches*100:.1f}%)")
+    print(f"   Copertura ELO Player 2 : {p2_found_count}/{total_matches} ({p2_found_count/total_matches*100:.1f}%)")
+    print(f"   Match validi (Entrambi): {matches_with_both_elos}/{total_matches} ({matches_with_both_elos/total_matches*100:.1f}%)")
     
-    return df_merged
+    return merged_dataset

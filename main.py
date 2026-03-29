@@ -1,108 +1,93 @@
-'''
-🏓 Table Tennis Match Prediction
+"""
+================================================================================
+🏓 TABLE TENNIS MATCH PREDICTION
+================================================================================
+Autore: Alessandro Sollevanti
+Data: Gennaio 2026
+Corso: Ingegneria Informatica - Machine Learning
 
-Autore: Alessandro Sollevanti  
-Data: Gennaio 2026  
-Corso: Machine Learning
+## OBIETTIVO DEL PROGETTO:
+Questo progetto sviluppa un modello di Machine Learning per predire il vincitore di partite di tennis tavolo (circuito TT Elite Series) 
+prima dell'inizio del match, utilizzando i dati storici dei giocatori come il divario di punteggio ELO, lo stato di forma recente, 
+l'esito degli scontri diretti e il momentum (le serie di vittorie o sconfitte di fila).
 
-## Obiettivo del Progetto:
-Questo progetto sviluppa un modello di Machine Learning per predire il vincitore 
-di partite di tennis tavolo prima dell'inizio del match, utilizzando dati storici 
-e ranking ELO dei giocatori.
+Per fare le predizioni, sono stati addestrati e confrontati tre diversi algoritmi di classificazione: 
+Logistic Regression, Random Forest e Neural Network (MLP). 
+Infine, le valutazioni di questi tre algoritmi sono state unite in un quarto e ultimo modello, un Ensemble (Soft Voting Classifier), 
+che ne calcola la media probabilistica per ottenere previsioni più stabili e ridurre il margine di errore.
 
-## Pipeline Completa del Progetto:
+## PIPELINE COMPLETA DEL PROGETTO:
 
 ###  DATA LOADING & PREPROCESSING (Fasi 1-3)
 1. Caricamento Dataset
-   - Import file partite (9415 match TT Elite Series)
-   - Import ranking ELO (413 giocatori, rating 216-1520)
-   - Validazione colonne obbligatorie e ordinamento temporale
+   - Import file partite (raccolta di 9415 match del torneo polacco "TT Elite Series" in una finestra temporale di un mese)
+   - Import ranking ELO ufficiale (413 giocatori, rating 216-1520)
 
 2. Preprocessing
    - Normalizzazione nomi (rimozione accenti, caratteri speciali)
-   - Risoluzione duplicati nel ranking (mantiene ELO più alto)
-   - Inversione formato: "Cognome Nome" → "Nome Cognome"
-   - Merge LEFT JOIN per associare ELO a ogni giocatore
+   - Inversione formato "Cognome Nome" e risoluzione duplicati
+   - Merge LEFT JOIN per associare l'ELO ai rispettivi giocatori
 
 3. Feature Engineering
-   - Creazione 11 features con rolling window (zero data leakage)
-   - Categorie: Ranking (2), Win Rate (2), Head-to-Head (3), Momentum (2), Volatilità (2)
-   - Pulizia finale: rimozione partite con ELO mancante
+   - Creazione di 10 variabili predittive calcolate tramite "Rolling Window"
+   - Utilizzo esclusivo dello storico antecedente al match (zero data leakage)
 
 ###  EXPLORATORY DATA ANALYSIS & OUTLIER DETECTION (Fase 4)
 4. Analisi Esplorativa + Outlier Detection
-   - Bilanciamento target (distribuzione vittorie P1 vs P2)
-   - Distribuzione ELO (boxplot, identificazione outliers con IQR)
-   - Relazione ELO difference vs probabilità vittoria
-   - Outlier Detection (Sez. 4.6): Studentized Residuals, Leverage, DFFITS
-   - Rimozione sample anomali per migliorare robustezza modello
-   - Nota: Analisi su dataset completo, pulizia prima dello split
+   - Bilanciamento target, distribuzioni ELO e relazione differenza punteggio-vittoria
+   - Outlier Detection: Studentized Residuals, Leverage e DFFITS
+   - Rimozione sample anomali per aumentare la robustezza del modello
 
 ###  TRAIN/TEST SPLIT & FEATURE ANALYSIS (Fasi 5-6)
 5. Split Temporale
-   - Divisione 80/20 basata su ordine cronologico (non random)
-   - Previene data leakage: train su passato, test su futuro
-   - Test set viene "congelato" fino alla valutazione finale
-   - Definizione lista 11 features per modelli
+   - Divisione 80/20 rigorosamente in ordine cronologico (Train sul passato, Test sul futuro)
+   - Test set "congelato" fino alla valutazione finale
 
-6. Analisi Correlazioni (SOLO su Train Set)
-   - Matrice di correlazione Pearson (features + target)
-   - VIF (Variance Inflation Factor) per rilevare multicollinearità
-   - Identificazione features ridondanti o problematiche
-   - Nota: Analisi SOLO su train per evitare data leakage
+6. Analisi Correlazioni e Multicollinearità
+   - Esecuzione SOLO sul train set per evitare data leakage
+   - Matrice di correlazione e VIF (Variance Inflation Factor)
+   - Rimozione delle feature ridondanti per pulire il modello predittivo
 
 ###  MODELING & VALIDATION (Fasi 7-10)
 7. Preparazione Dati
-   - Creazione target binario (1 = P1 vince, 0 = P2 vince)
-   - Normalizzazione con StandardScaler (fit SOLO su train)
-   - Separazione X_train, y_train, X_test, y_test
+   - Creazione target binario e normalizzazione con StandardScaler
 
-8. Training Modelli Base
-   - Logistic Regression (baseline lineare interpretabile)
-   - Random Forest (ensemble tree-based, feature importance)
-   - Neural Network con Early Stopping (riduce overfitting)
+8. Training Modelli
+   - Modelli Base: Logistic Regression, Random Forest, Neural Network (MLP)
+   - Modello Avanzato: Ensemble (Soft Voting) per mediare le probabilità dei 3 modelli
 
 9. Cross-Validation (5-Fold su Train Set)
-   - Valutazione robusta di ogni modello senza toccare test set
-   - Stima media e deviazione standard delle performance
-   - Selezione miglior modello basata su CV score medio
-   - Nota: Test set ancora NON toccato
+   - Valutazione robusta dei modelli senza barare guardando i dati di test
+   - Selezione del miglior modello basata sui punteggi medi della CV
 
-10. Hyperparameter Tuning (Opzionale)
-    - GridSearchCV con inner CV sul miglior modello (train only)
-    - Random Forest: n_estimators, max_depth, min_samples_split
-    - Logistic Regression: C, penalty (L1/L2 regularization)
-    - Modello finale ottimizzato pronto per test
+10. Hyperparameter Tuning
+    - Ottimizzazione dei parametri del miglior modello tramite GridSearchCV
 
 ###  FINAL EVALUATION (Fasi 11-12)
 11. Evaluation Finale su Test Set
-    - Metriche: Accuracy, Precision, Recall, F1-Score
-    - Confusion Matrix del modello finale
-    - Confronto con baseline e CV scores
-    - Nota: Test set toccato UNA SOLA VOLTA qui
+    - Test set utilizzato per la PRIMA e UNICA volta
+    - Valutazione tramite Accuracy, Precision, Recall, F1-Score e Confusion Matrix
 
-12. Analisi Avanzata (Visualizzazioni Finali)
-    - ROC Curve + AUC per tutti i modelli su test set
-    - Feature Importance (Random Forest) con interpretazione
-    - Analisi errori e pattern dalla Confusion Matrix
+12. Analisi Avanzata (Visualizzazioni)
+    - Curve ROC (AUC) per confrontare la sensibilità/specificità dei modelli
+    - Analisi di calibrazione delle probabilità (Brier Score)
 
-###  OUTPUT FINALE
-- Riepilogo completo: dataset size, outliers rimossi, features, modelli testati
-- Confronto CV scores vs test score (verifica overfitting)
-- Salvataggio grafici (10+ visualizzazioni)
-- Report dettagliato performance
-
-## Note Tecniche:
-- Zero Data Leakage: Rolling window per features, split temporale, analisi solo su train
-- Outlier Removal: Studentized residuals (Sez. 4.6 appunti) per dataset pulito
-- Riproducibilità: Seed fisso (42) per tutti i modelli
-- Scalabilità: Pipeline modulare con src/ packages separati
-- Test Set Discipline: Toccato una sola volta alla fine (Fase 11)
-'''
+## NOTE TECNICHE:
+- Zero Data Leakage: Garantito dallo split temporale e dalle rolling window.
+- Riproducibilità: Utilizzo di seed fissi (es. random_state=42).
+================================================================================
+"""
 
 import os
 import warnings
-warnings.filterwarnings('ignore')
+import joblib
+
+# Definizione del percorso della cartella destinata ai grafici generati
+plots_folder = "plots"
+
+# Controllo dell'esistenza della cartella: se non presente, viene creata automaticamente
+if not os.path.exists(plots_folder):
+    os.makedirs(plots_folder)
 
 # Import moduli del progetto
 from src.data_loader import load_data
@@ -113,7 +98,7 @@ from src.modeling import train_test_split_temporal, prepare_data, train_models, 
 from src.evaluation import evaluate_models, plot_confusion_matrix
 from src.advanced_analysis import (plot_correlation_matrix, calculate_vif, 
                                    plot_roc_curves, analyze_feature_importance,
-                                   perform_cross_validation)
+                                   perform_cross_validation, plot_calibration_curves)
 
 def main():
     # Header progetto
@@ -129,8 +114,11 @@ def main():
     print("FASE 1: CARICAMENTO DATASET")
     print("=" * 80)
     
+    #salvo i percorsi dei due dataset in due variabili per poi passarle alla funzione di caricamento dati
     matches_file = os.path.join('datasets', 'TT_Elite_COMBINED_9415_matches.csv')
     ranking_file = os.path.join('datasets', 'RANKING-TT-ELITE-SERIES.csv')
+    
+    # Caricamento dati
     df_matches, df_ranking = load_data(matches_file, ranking_file)
     
     # -------------------------------------------------------------------------
@@ -172,11 +160,11 @@ def main():
     print("OUTLIER DETECTION (integrato nell'EDA)")
     print("-" * 80)
     
-    # Definizione features per outlier detection
+    # Definizione features per outlier detection (Nomi aggiornati)
     feature_cols_outlier = [
         'player_1_elo', 'elo_diff',
         'p1_win_rate_last5', 'p2_win_rate_last5',
-        'h2h_p1_wins', 'h2h_p2_wins', 'h2h_ratio',
+        'p1_head_to_head_wins', 'p2_head_to_head_wins', 'p1_head_to_head_win_ratio',
         'p1_streak', 'p2_streak',
         'p1_form_volatility', 'p2_form_volatility'
     ]
@@ -211,38 +199,31 @@ def main():
     
     train, test = train_test_split_temporal(df_clean, test_size=0.2)
     
-    # Definizione features (11 totali - VERSIONE CORRETTA)
+    # Definizione delle 10 features finali (Nomi aggiornati)
     feature_cols = [
-        # Ranking ELO (2 features - RIMOSSA player_2_elo per VIF infinito)
-        'player_1_elo',  # Livello assoluto P1
-        'elo_diff',      # Differenza ELO (TOP FEATURE - corr +0.26)
-        # NOTA: player_2_elo rimossa (ridondante: p2_elo = p1_elo - elo_diff)
-        
-        # Win Rate (2 features - solo last5, più predittivo)
+        'elo_diff',
         'p1_win_rate_last5', 'p2_win_rate_last5',
-        
-        # Head-to-Head (3 features - aggiunto ratio)
-        'h2h_p1_wins', 'h2h_p2_wins', 'h2h_ratio',
-        
-        # Momentum (2 features)
+        'p1_head_to_head_wins', 'p2_head_to_head_wins', 'p1_head_to_head_win_ratio',
         'p1_streak', 'p2_streak',
-        
-        # Volatilità (2 features)
         'p1_form_volatility', 'p2_form_volatility'
     ]
     
-    print(f"\nFeatures selezionate: {len(feature_cols)} (ottimizzato da 16)")
-    print("   Rimosse 5 features ridondanti o deboli:")
-    print("     • elo_sum (corr 0.01)")
-    print("     • player_2_elo (VIF infinito - ridondante con p1_elo e elo_diff)")
-    print("     • p1/p2_win_rate_overall (VIF 17)")
-    print("     • p1/p2_recent_form (VIF 15)")
-    print("\n   Categorie finali:")
-    print("     • ELO (2): player_1_elo, elo_diff")
-    print("     • Win Rate (2): p1/p2_win_rate_last5")
-    print("     • H2H (3): p1/p2_wins, ratio")
-    print("     • Momentum (2): p1/p2_streak")
-    print("     • Volatilità (2): p1/p2_form_volatility")
+    print(f"\nFeatures selezionate: {len(feature_cols)} (Dataset ottimizzato)")
+    print("   Elenco esatto delle features rimosse per ottimizzazione (VIF Analysis):")
+    print("     1. player_1_elo        (Rimosso per VIF > 10: manteniamo solo elo_diff)")
+    print("     2. player_2_elo        (Rimosso per VIF infinito: ridondanza matematica perfetta)")
+    print("     3. elo_sum             (Rimosso per correlazione col target quasi nulla: 0.01)")
+    print("     4. p1_win_rate_overall (Rimosso per VIF 17: troppo correlato con la forma recente)")
+    print("     5. p2_win_rate_overall (Rimosso per VIF 17: troppo correlato con la forma recente)")
+    print("     6. p1_recent_form      (Rimosso per VIF 15: ridondante rispetto a win_rate_last5)")
+    print("     7. p2_recent_form      (Rimosso per VIF 15: ridondante rispetto a win_rate_last5)")
+    
+    print("\n   Categorie finali mantenute (10 features):")
+    print("     • ELO (1): elo_diff")
+    print("     • Win Rate (2): p1_win_rate_last5, p2_win_rate_last5")
+    print("     • Head-to-Head (3): p1_head_to_head_wins, p2_head_to_head_wins, p1_head_to_head_win_ratio")
+    print("     • Momentum (2): p1_streak, p2_streak")
+    print("     • Volatilità (2): p1_form_volatility, p2_form_volatility")
     
     # Verifica e gestione valori mancanti
     print(f"\nVerifica valori mancanti nelle features:")
@@ -362,13 +343,15 @@ def main():
     # ROC Curves per tutti i modelli
     plot_roc_curves(models, X_test, y_test)
     
+    # Calibrazione e Brier Score
+    plot_calibration_curves(models, X_test, y_test)
+    
     # Feature importance (solo Random Forest)
     if 'Random Forest' in best_model_name:
         importance_df = analyze_feature_importance(best_model, feature_cols)
     else:
         print(f"\nFeature importance non disponibile per {best_model_name}")
         print("(disponibile solo per Random Forest)")
-
 
     
     # -------------------------------------------------------------------------
@@ -408,20 +391,19 @@ def main():
     print("   • correlation_matrix.png - Matrice correlazioni (train set)")
     print("   • confusion_matrix_{}.png - Matrice confusione".format(best_model_name.replace(' ', '_')))
     print("   • roc_curves.png - ROC curves confronto modelli")
+    print("   • calibration_curves.png - Calibrazione probabilità e Brier Score")
     if 'Random Forest' in best_model_name:
         print("   • feature_importance.png - Importanza features")
     
     print("\n✓ Pipeline completata con successo!")
     print("=" * 80)
 
-     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # FASE 13: SALVATAGGIO MODELLI
     # -------------------------------------------------------------------------
     print("\n" + "=" * 80)
     print("FASE 13: SALVATAGGIO MODELLI")
     print("=" * 80)
-
-    import joblib
 
     # Crea cartella models se non esiste
     os.makedirs('models', exist_ok=True)
@@ -437,15 +419,14 @@ def main():
 
     joblib.dump(models['Neural Network'], 'models/neural_network.pkl')
     print("   ✅ neural_network.pkl")
+    
+    joblib.dump(models['Ensemble Voting'], 'models/ensemble_voting.pkl')
+    print("   ✅ ensemble_voting.pkl")
 
     joblib.dump(scaler, 'models/scaler.pkl')
     print("   ✅ scaler.pkl")
 
     print("\n✓ Modelli salvati con successo!")
-    print("=" * 80)
-    print("\n🎯 Ora puoi usare: python predict_match.py")
-
-
 
 if __name__ == '__main__':
     main()

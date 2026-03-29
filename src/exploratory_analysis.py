@@ -1,17 +1,20 @@
 """
-Modulo per l'Exploratory Data Analysis (EDA).
+Modulo per l'Exploratory Data Analysis (EDA) e la Pulizia Statistica.
 
-Questo modulo implementa l'analisi esplorativa dei dati per:
-- Verificare il bilanciamento delle classi (target)
-- Analizzare la distribuzione dei rating ELO
-- Identificare outliers con metodo IQR
-- Studiare la relazione tra differenza ELO e probabilità di vittoria
+Questo modulo è progettato per ispezionare la qualità dei dati prima dell'addestramento:
+1. Bilanciamento Target: Verifica se una classe domina sull'altra.
+2. Distribuzione ELO: Analisi della gaussiana dei punteggi dei giocatori.
+3. Potere Predittivo: Relazione visiva tra Differenza ELO e probabilità di vittoria.
+4. Outlier Detection (Metodi Robust Statistics): Identificazione e rimozione 
+   di sample anomali che potrebbero distorcere i modelli (Studentized Residuals, Leverage, DFFITS).
 """
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import pandas as pd
+import os
+
 
 
 # ==============================================================================
@@ -20,477 +23,350 @@ import pandas as pd
 
 def analyze_target_balance(df):
     """
-    Analizza il bilanciamento del dataset rispetto al target.
+    Analizza la distribuzione delle vittorie tra Player 1 e Player 2.
     
-    Un dataset bilanciato (50%-50%) garantisce che il modello impari
-    equamente da entrambe le classi. Se sbilanciato, il modello potrebbe
-    semplicemente "imparare" a predire sempre la classe maggioritaria.
+    Perché è importante:
+    Un dataset bilanciato (~50%) permette di usare l'Accuracy come metrica affidabile.
+    Se fosse sbilanciato (es. 90%-10%), un modello "stupido" che predice sempre
+    la classe maggioritaria otterrebbe il 90% senza imparare nulla.
     
     Args:
-        df (DataFrame): Dataset con colonna 'player_1_wins' (0 o 1)
+        df (DataFrame): Dataset contenente la colonna 'player_1_wins'
     
     Returns:
-        float: Baseline accuracy (percentuale classe maggioritaria)
-    
-    Output:
-        - Stampa statistiche distribuzione
-        - Salva grafico 'target_balance.png'
+        float: Accuracy della Baseline (percentuale della classe maggioritaria)
     """
     print("\n" + "=" * 80)
-    print("ANALISI 1: BILANCIAMENTO TARGET")
+    print("ANALISI 1: BILANCIAMENTO DELLE CLASSI (TARGET)")
     print("=" * 80)
     
-    # Calcola distribuzione target
-    target_counts = df['player_1_wins'].value_counts()
-    target_pct = df['player_1_wins'].value_counts(normalize=True) * 100
+    # Calcolo frequenze assolute e percentuali
+    win_counts = df['player_1_wins'].value_counts()
+    win_percentages = df['player_1_wins'].value_counts(normalize=True) * 100
     
-    print(f"\nDistribuzione target:")
-    print(f"   Player 1 vince (target=1): {target_counts[1]:,} ({target_pct[1]:.1f}%)")
-    print(f"   Player 2 vince (target=0): {target_counts[0]:,} ({target_pct[0]:.1f}%)")
+    print(f"\nDistribuzione del Target:")
+    print(f"   Vittorie Player 1 (Target=1): {win_counts[1]:,} ({win_percentages[1]:.1f}%)")
+    print(f"   Vittorie Player 2 (Target=0): {win_counts[0]:,} ({win_percentages[0]:.1f}%)")
     
-    # Baseline accuracy: accuracy ottenibile predicendo sempre classe maggioritaria
-    baseline = target_pct.max()
-    print(f"\nBaseline accuracy: {baseline:.1f}%")
-    print(f"(Un modello che predice sempre la classe maggioritaria ottiene {baseline:.1f}%)")
+    # La baseline è la percentuale più alta. Questo è il nostro "Punto Zero" da battere.
+    majority_class_baseline = win_percentages.max()
+    print(f"\nBaseline Accuracy: {majority_class_baseline:.1f}%")
+    print(f"(Significa che tirando a indovinare sempre la classe maggioritaria si ottiene {majority_class_baseline:.1f}%)")
     
     # -------------------------------------------------------------------------
-    # Visualizzazione grafico a barre
+    # Visualizzazione Grafica
     # -------------------------------------------------------------------------
     plt.figure(figsize=(8, 6))
     
-    labels = ['Player 2 Vince', 'Player 1 Vince']
-    colors = ['#FF6B6B', '#4ECDC4']  # Rosso per P2, Verde per P1
+    class_labels = ['Vittoria Player 2', 'Vittoria Player 1']
+    bar_colors = ['#FF6B6B', '#4ECDC4']  # Rosso per P2, Verde per P1
     
-    plt.bar(labels, target_counts.values, color=colors, alpha=0.7, edgecolor='black')
+    bars = plt.bar(class_labels, win_counts.values, color=bar_colors, alpha=0.7, edgecolor='black')
     
-    # Aggiungi etichette con valori sopra le barre
-    for i, (count, pct) in enumerate(zip(target_counts.values, target_pct.values)):
-        plt.text(i, count + 50, f'{count:,}\n({pct:.1f}%)',
-                ha='center', va='bottom', fontsize=11, fontweight='bold')
+    # Aggiunge le etichette di testo sopra ogni barra
+    for index, (count, percentage) in enumerate(zip(win_counts.values, win_percentages.values)):
+        plt.text(index, count + 50, f'{count:,}\n({percentage:.1f}%)',
+                 ha='center', va='bottom', fontsize=11, fontweight='bold')
     
-    # Linea orizzontale per bilanciamento perfetto 50%
-    plt.axhline(y=len(df)/2, color='gray', linestyle='--', 
-                linewidth=1.5, label='Bilanciamento perfetto (50%)')
+    # Linea tratteggiata per indicare il bilanciamento perfetto
+    plt.axhline(y=len(df)/2, color='gray', linestyle='--', linewidth=1.5, label='Bilanciamento Perfetto (50%)')
     
-    plt.xlabel('Classe Target', fontsize=11)
-    plt.ylabel('Numero Partite', fontsize=11)
-    plt.title('Bilanciamento Classi Target', fontweight='bold', fontsize=13)
+    plt.xlabel('Esito Partita', fontsize=11)
+    plt.ylabel('Numero di Partite', fontsize=11)
+    plt.title('Bilanciamento delle Classi Target', fontweight='bold', fontsize=13)
     plt.legend()
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
     
-    # Salva grafico
-    plt.savefig('target_balance.png', dpi=150)
-    print("\n✓ Grafico salvato: target_balance.png")
+    path_grafico = os.path.join("plots", "target_balance.png")
+    plt.savefig(path_grafico, dpi=150)
+    print("\n✓ Grafico esportato: target_balance.png")
     plt.show()
     
-    return baseline
+    return majority_class_baseline
 
 
 # ==============================================================================
-# ANALISI 2: DISTRIBUZIONE RATING ELO
+# ANALISI 2: DISTRIBUZIONE RATING ELO E OUTLIERS BASE
 # ==============================================================================
 
 def analyze_elo_distributions(df):
     """
-    Analizza la distribuzione dei rating ELO dei giocatori.
-    
-    Obiettivi:
-    - Verificare che Player 1 e Player 2 abbiano distribuzioni simili
-      (non ci dovrebbe essere bias sistematico)
-    - Identificare outliers (giocatori con rating anomali)
-    - Visualizzare range e concentrazione dei rating
-    
-    Args:
-        df (DataFrame): Dataset con colonne 'player_1_elo', 'player_2_elo'
-    
-    Output:
-        - Stampa statistiche outliers
-        - Salva grafico 'elo_distributions.png' con istogrammi e boxplot
+    Analizza visivamente la distribuzione dei punteggi ELO e individua
+    valori anomali (outliers unidimensionali) tramite il metodo IQR.
     """
     print("\n" + "=" * 80)
-    print("ANALISI 2: DISTRIBUZIONE RATING ELO")
+    print("ANALISI 2: DISTRIBUZIONE STATISTICA DEL RATING ELO")
     print("=" * 80)
     
-    # -------------------------------------------------------------------------
-    # Subplot 1: Istogrammi sovrapposti
-    # -------------------------------------------------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Istogrammi sovrapposti per confronto visivo
-    axes[0].hist(df['player_1_elo'], bins=30, alpha=0.6, color='#4ECDC4',
-                label='Player 1', edgecolor='black')
-    axes[0].hist(df['player_2_elo'], bins=30, alpha=0.6, color='#FF6B6B',
-                label='Player 2', edgecolor='black')
-    
-    axes[0].set_xlabel('Rating ELO', fontsize=11)
-    axes[0].set_ylabel('Frequenza', fontsize=11)
-    axes[0].set_title('Distribuzione Rating ELO', fontweight='bold')
+    # -- Subplot 1: Istogrammi Sovrapposti --
+    axes[0].hist(df['player_1_elo'], bins=30, alpha=0.6, color='#4ECDC4', label='Player 1 ELO', edgecolor='black')
+    axes[0].hist(df['player_2_elo'], bins=30, alpha=0.6, color='#FF6B6B', label='Player 2 ELO', edgecolor='black')
+    axes[0].set_xlabel('Punteggio ELO', fontsize=11)
+    axes[0].set_ylabel('Frequenza Assoluta', fontsize=11)
+    axes[0].set_title('Distribuzione Gaussiana dei Rating ELO', fontweight='bold')
     axes[0].legend()
     axes[0].grid(axis='y', alpha=0.3)
     
-    # -------------------------------------------------------------------------
-    # Subplot 2: Boxplot comparativo
-    # -------------------------------------------------------------------------
-    # Boxplot utile per identificare outliers visivamente
-    # I "baffi" si estendono a 1.5*IQR, punti oltre sono outliers
-    
-    # Prepara dati in formato long per seaborn
-    elo_data = pd.DataFrame({
-        'ELO': list(df['player_1_elo']) + list(df['player_2_elo']),
-        'Player': ['Player 1'] * len(df) + ['Player 2'] * len(df)
+    # -- Subplot 2: Boxplot Comparativo (Outlier visivi) --
+    flattened_elo_data = pd.DataFrame({
+        'ELO_Score': list(df['player_1_elo']) + list(df['player_2_elo']),
+        'Player_Role': ['Player 1'] * len(df) + ['Player 2'] * len(df)
     })
     
-    sns.boxplot(data=elo_data, x='Player', y='ELO', 
-                palette=['#4ECDC4', '#FF6B6B'], ax=axes[1])
-    axes[1].set_title('Boxplot ELO (Identificazione Outliers)', fontweight='bold')
+    sns.boxplot(data=flattened_elo_data, x='Player_Role', y='ELO_Score', palette=['#4ECDC4', '#FF6B6B'], ax=axes[1])
+    axes[1].set_title('Boxplot ELO (Rilevamento Outliers)', fontweight='bold')
     axes[1].grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('elo_distributions.png', dpi=150)
-    print("\n✓ Grafico salvato: elo_distributions.png")
+    path_grafico = os.path.join("plots", "elo_distributions.png")
+    plt.savefig(path_grafico, dpi=150)
+    print("\n✓ Grafico esportato: elo_distributions.png")
     plt.show()
     
     # -------------------------------------------------------------------------
-    # Identificazione outliers con metodo IQR
+    # Calcolo matematico Outliers (Metodo IQR - Interquartile Range)
     # -------------------------------------------------------------------------
-    # Metodo IQR (Interquartile Range):
-    # - Q1 = 25° percentile, Q3 = 75° percentile
-    # - IQR = Q3 - Q1
-    # - Outliers: valori < Q1 - 1.5*IQR o > Q3 + 1.5*IQR
+    print("\nRicerca Outliers tramite IQR (Interquartile Range):")
     
-    print("\nIdentificazione outliers (metodo IQR):")
-    
-    for col, label in [('player_1_elo', 'Player 1'), ('player_2_elo', 'Player 2')]:
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
+    for column_name, display_label in [('player_1_elo', 'Player 1'), ('player_2_elo', 'Player 2')]:
+        first_quartile = df[column_name].quantile(0.25)
+        third_quartile = df[column_name].quantile(0.75)
+        interquartile_range = third_quartile - first_quartile
         
-        # Calcola limiti
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
+        lower_bound = first_quartile - 1.5 * interquartile_range
+        upper_bound = third_quartile + 1.5 * interquartile_range
         
-        # Identifica outliers
-        outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
+        outliers_found = df[(df[column_name] < lower_bound) | (df[column_name] > upper_bound)]
         
-        print(f"\n   {label}:")
-        print(f"      Q1 = {Q1:.0f}, Q3 = {Q3:.0f}, IQR = {IQR:.0f}")
-        print(f"      Range normale: [{lower_bound:.0f}, {upper_bound:.0f}]")
-        print(f"      Outliers: {len(outliers)} ({len(outliers)/len(df)*100:.1f}%)")
+        print(f"\n   {display_label}:")
+        print(f"      Q1 = {first_quartile:.0f}, Q3 = {third_quartile:.0f}, IQR = {interquartile_range:.0f}")
+        print(f"      Range di normalità: [{lower_bound:.0f}, {upper_bound:.0f}]")
+        print(f"      Outliers identificati: {len(outliers_found)} ({len(outliers_found)/len(df)*100:.1f}%)")
 
 
 # ==============================================================================
-# ANALISI 3: RELAZIONE ELO DIFFERENCE vs VITTORIA
+# ANALISI 3: VERIFICA POTERE PREDITTIVO ELO
 # ==============================================================================
 
 def analyze_elo_vs_win(df):
     """
-    Analizza la relazione tra differenza ELO e probabilità di vittoria.
-    
-    Ipotesi da verificare:
-    - Se Player 1 ha ELO maggiore (+100, +200, ecc.), dovrebbe vincere più spesso
-    - La relazione dovrebbe essere monotona crescente
-    - Serve per validare che il rating ELO sia effettivamente predittivo
-    
-    Args:
-        df (DataFrame): Dataset con colonne 'elo_diff', 'player_1_wins'
-    
-    Output:
-        - Stampa tabella win rate per bin
-        - Salva grafico 'elo_diff_vs_win.png' con bar plot e scatter
+    Verifica se all'aumentare della differenza di ELO a favore del Player 1,
+    aumenta effettivamente la sua probabilità di vittoria (Trend Monotono).
     """
     print("\n" + "=" * 80)
-    print("ANALISI 3: RELAZIONE ELO DIFFERENCE vs VITTORIA")
+    print("ANALISI 3: RELAZIONE DIFFERENZA ELO vs PROBABILITÀ DI VITTORIA")
     print("=" * 80)
     
-    # -------------------------------------------------------------------------
-    # Creazione bin per differenza ELO
-    # -------------------------------------------------------------------------
-    # Dividiamo la differenza ELO in range significativi
-    bins = [-np.inf, -200, -100, -50, 0, 50, 100, 200, np.inf]
-    labels = ['<-200', '-200/-100', '-100/-50', '-50/0', 
-              '0/50', '50/100', '100/200', '>200']
+    # Creazione di "secchielli" (bin) per raggruppare le differenze ELO
+    elo_bins = [-np.inf, -200, -100, -50, 0, 50, 100, 200, np.inf]
+    bin_labels = ['<-200', '-200/-100', '-100/-50', '-50/0', '0/50', '50/100', '100/200', '>200']
     
-    df['elo_diff_bin'] = pd.cut(df['elo_diff'], bins=bins, labels=labels)
+    df['elo_difference_category'] = pd.cut(df['elo_diff'], bins=elo_bins, labels=bin_labels)
     
-    # Calcola win rate per ogni bin
-    win_rate_by_bin = df.groupby('elo_diff_bin', observed=True)['player_1_wins'].agg(['mean', 'count'])
-    win_rate_by_bin['win_rate_pct'] = win_rate_by_bin['mean'] * 100
+    # Calcolo del Win Rate per ogni categoria
+    win_rate_by_category = df.groupby('elo_difference_category', observed=True)['player_1_wins'].agg(['mean', 'count'])
+    win_rate_by_category['win_rate_percentage'] = win_rate_by_category['mean'] * 100
     
-    # Stampa tabella
-    print("\nWin rate Player 1 per range ELO difference:")
-    print("\nRange ELO     Win Rate    N. Partite")
+    print("\nWin rate Player 1 per fasce di divario ELO:")
+    print("\nFascia ELO       Win Rate    N. Partite")
     print("-" * 45)
-    for idx, row in win_rate_by_bin.iterrows():
-        print(f"{str(idx):12s}  {row['win_rate_pct']:6.1f}%     {int(row['count']):6d}")
+    for category_idx, row in win_rate_by_category.iterrows():
+        print(f"{str(category_idx):12s}  {row['win_rate_percentage']:6.1f}%     {int(row['count']):6d}")
     print("-" * 45)
     
     # -------------------------------------------------------------------------
-    # Visualizzazione: Bar plot + Scatter plot
+    # Visualizzazione: Bar Plot + Scatter
     # -------------------------------------------------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # ----- Subplot 1: Bar plot win rate per bin -----
-    # Colora barre in base a win rate (rosso <50%, verde >50%)
-    colors = ['#FF4444' if wr < 50 else '#44FF44' 
-              for wr in win_rate_by_bin['win_rate_pct']]
+    # -- Subplot 1: Bar Plot --
+    bar_colors = ['#FF4444' if rate < 50 else '#44FF44' for rate in win_rate_by_category['win_rate_percentage']]
     
-    bars = axes[0].bar(range(len(win_rate_by_bin)), 
-                      win_rate_by_bin['win_rate_pct'],
-                      color=colors, alpha=0.7, edgecolor='black')
+    bars = axes[0].bar(range(len(win_rate_by_category)), win_rate_by_category['win_rate_percentage'],
+                       color=bar_colors, alpha=0.7, edgecolor='black')
     
-    # Linea riferimento 50% (vittoria casuale)
-    axes[0].axhline(y=50, color='black', linestyle='--', 
-                   linewidth=2, label='50% (Random)')
-    
-    axes[0].set_xticks(range(len(win_rate_by_bin)))
-    axes[0].set_xticklabels(labels, rotation=45, ha='right')
-    axes[0].set_xlabel('ELO Difference (Player 1 - Player 2)', fontsize=11)
+    axes[0].axhline(y=50, color='black', linestyle='--', linewidth=2, label='Random Guess (50%)')
+    axes[0].set_xticks(range(len(win_rate_by_category)))
+    axes[0].set_xticklabels(bin_labels, rotation=45, ha='right')
+    axes[0].set_xlabel('Vantaggio ELO (Player 1 - Player 2)', fontsize=11)
     axes[0].set_ylabel('Win Rate Player 1 (%)', fontsize=11)
-    axes[0].set_title('Win Rate per Range ELO Difference', fontweight='bold')
+    axes[0].set_title('Tasso di Vittoria per Fascia ELO', fontweight='bold')
     axes[0].legend()
     axes[0].grid(axis='y', alpha=0.3)
     
-    # Aggiungi percentuali sopra le barre
-    for i, (bar, pct) in enumerate(zip(bars, win_rate_by_bin['win_rate_pct'])):
+    for bar, percentage in zip(bars, win_rate_by_category['win_rate_percentage']):
         axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{pct:.1f}%', ha='center', va='bottom', fontsize=9)
+                     f'{percentage:.1f}%', ha='center', va='bottom', fontsize=9)
     
-    # ----- Subplot 2: Scatter plot con trend line -----
-    # Scatter plot mostra ogni singola partita
-    # Trend line mostra relazione media
+    # -- Subplot 2: Scatter Plot & Trend Line --
+    dynamic_bins = pd.cut(df['elo_diff'], bins=20)
+    trend_line_data = df.groupby(dynamic_bins, observed=True)['player_1_wins'].mean()
+    bin_centers = [interval.mid for interval in trend_line_data.index]
     
-    # Calcola trend line (media mobile su 20 bin)
-    elo_diff_bins = pd.cut(df['elo_diff'], bins=20)
-    trend_data = df.groupby(elo_diff_bins, observed=True)['player_1_wins'].mean()
-    bin_centers = [interval.mid for interval in trend_data.index]
+    axes[1].scatter(df['elo_diff'], df['player_1_wins'], alpha=0.05, s=5, color='gray', label='Partite individuali')
+    axes[1].plot(bin_centers, trend_line_data.values, color='red', linewidth=3, label='Trend Line (Media)')
+    axes[1].axhline(y=0.5, color='black', linestyle='--', linewidth=1.5, label='Soglia 50%')
     
-    # Scatter plot (alpha basso per gestire sovrapposizione)
-    axes[1].scatter(df['elo_diff'], df['player_1_wins'], 
-                   alpha=0.05, s=5, color='gray', label='Partite individuali')
-    
-    # Trend line
-    axes[1].plot(bin_centers, trend_data.values, 
-                color='red', linewidth=3, label='Trend medio')
-    
-    # Linea riferimento 50%
-    axes[1].axhline(y=0.5, color='black', linestyle='--', 
-                   linewidth=1.5, label='50%')
-    
-    axes[1].set_xlabel('ELO Difference (Player 1 - Player 2)', fontsize=11)
-    axes[1].set_ylabel('Probabilità Vittoria Player 1', fontsize=11)
-    axes[1].set_title('Scatter Plot: ELO Difference vs Vittoria', fontweight='bold')
+    axes[1].set_xlabel('Vantaggio ELO (Player 1 - Player 2)', fontsize=11)
+    axes[1].set_ylabel('Probabilità di Vittoria Player 1', fontsize=11)
+    axes[1].set_title('Scatter Plot: Vantaggio ELO vs Esito', fontweight='bold')
     axes[1].legend()
     axes[1].grid(alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('elo_diff_vs_win.png', dpi=150)
-    print("\n✓ Grafico salvato: elo_diff_vs_win.png")
+    path_grafico = os.path.join("plots", "elo_diff_vs_win.png")
+    plt.savefig(path_grafico, dpi=150)
+    print("\n✓ Grafico esportato: elo_diff_vs_win.png")
     plt.show()
 
 
 # ==============================================================================
-# FUNZIONE WRAPPER: ESEGUE EDA COMPLETA
+# FUNZIONE WRAPPER: ESECUZIONE PIPELINE EDA
 # ==============================================================================
 
 def run_eda(df_clean):
-    """
-    Esegue tutte le analisi esplorative in sequenza.
-    
-    Pipeline:
-    1. Crea colonne necessarie (player_1_wins, elo_diff)
-    2. Analizza bilanciamento target
-    3. Analizza distribuzione ELO
-    4. Analizza relazione ELO vs vittoria
-    
-    Args:
-        df_clean (DataFrame): Dataset pulito con colonne player_1_elo, 
-                             player_2_elo, winner, player_1
-    
-    Returns:
-        float: Baseline accuracy per confronto con modelli
-    """
+    """Esegue le analisi esplorative in sequenza e restituisce la baseline."""
     print("=" * 80)
-    print("EXPLORATORY DATA ANALYSIS")
+    print("AVVIO EXPLORATORY DATA ANALYSIS (EDA)")
     print("=" * 80)
     
-    # Crea colonna target binario se non esiste
-    # player_1_wins = 1 se vince Player 1, 0 altrimenti
     if 'player_1_wins' not in df_clean.columns:
         df_clean['player_1_wins'] = (df_clean['winner'] == df_clean['player_1']).astype(int)
     
-    # Crea colonna differenza ELO se non esiste
     if 'elo_diff' not in df_clean.columns:
         df_clean['elo_diff'] = df_clean['player_1_elo'] - df_clean['player_2_elo']
     
-    # Esegui analisi in sequenza
-    baseline = analyze_target_balance(df_clean)
+    baseline_accuracy = analyze_target_balance(df_clean)
     analyze_elo_distributions(df_clean)
     analyze_elo_vs_win(df_clean)
     
-    print("\n✓ EDA completata con successo")
-    
-    return baseline
+    print("\n✓ Pipeline EDA completata con successo")
+    return baseline_accuracy
 
 # ==============================================================================
-# OUTLIER DETECTION (Sezione 4.6 appunti corso)
+# ADVANCED OUTLIER DETECTION (Basato su Appunti Sezione 4.6)
 # ==============================================================================
 
-def detect_outliers(X, y, feature_names=None, verbose=True):
+def detect_outliers(feature_matrix_X, target_vector_y, feature_names=None, verbose=True):
     """
-    Rileva outliers usando metodi del corso (Sezione 4.6).
+    Rileva anomalie multivariate usando l'algebra lineare (Hat Matrix e Residui).
     
-    Implementa 3 criteri:
-    1. Studentized Residuals: |r_i*| > 3 → outlier nel target
-    2. Leverage (Hat matrix): h_ii > 3*D/N → High Leverage Point
-    3. DFFITS: |DFFITS_i| > 2*sqrt(D/N) → High Influence Point
-    
-    Args:
-        X: Features (numpy array o DataFrame)
-        y: Target (numpy array o Series)
-        feature_names: Nomi features (opzionale)
-        verbose: Stampa report (default True)
-    
-    Returns:
-        dict con:
-            - 'outlier_indices': indici sample da rimuovere
-            - 'studentized_residuals': residui studentizzati
-            - 'leverage': valori leverage
-            - 'dffits': valori DFFITS
+    Criteri implementati:
+    1. Studentized Residuals (Outlier nel Target): Errore di predizione anomalo.
+    2. Leverage (High Leverage Point - HLP): Valori anomali nello spazio delle features.
+    3. DFFITS (High Influence Point - HIP): Impatto estremo sul modello se rimosso.
     """
     if verbose:
         print("\n" + "=" * 80)
-        print("OUTLIER DETECTION (Sezione 4.6 Appunti)")
+        print("OUTLIER DETECTION AVANZATA (Rif. Sezione 4.6 Appunti Universitari)")
         print("=" * 80)
     
-    N, D = X.shape
+    num_samples, num_features = feature_matrix_X.shape
     
     # -------------------------------------------------------------------------
-    # 1. Calcolo Hat Matrix H = X(X^T X)^-1 X^T
+    # 1. Hat Matrix e Leverage
     # -------------------------------------------------------------------------
-    # Aggiungi colonna di 1 per intercetta (bias)
-    X_with_bias = np.column_stack([np.ones(N), X])
+    # Aggiungiamo una colonna di '1' per l'intercetta (bias) del modello lineare
+    feature_matrix_with_intercept = np.column_stack([np.ones(num_samples), feature_matrix_X])
     
-    # Hat matrix (da appunti: H mette il "cappello" su y)
     try:
-        XtX_inv = np.linalg.inv(X_with_bias.T @ X_with_bias)
-        H = X_with_bias @ XtX_inv @ X_with_bias.T
-        leverage = np.diag(H)  # h_ii = leverage di ogni sample
+        # Calcolo dell'inversa della matrice di covarianza (X^T * X)^-1
+        inverse_covariance_matrix = np.linalg.inv(feature_matrix_with_intercept.T @ feature_matrix_with_intercept)
+        # La Hat Matrix (H) proietta le Y reali sulle Y predette
+        hat_matrix = feature_matrix_with_intercept @ inverse_covariance_matrix @ feature_matrix_with_intercept.T
+        leverage_scores = np.diag(hat_matrix)
     except np.linalg.LinAlgError:
-        if verbose:
-            print("⚠️  Matrice singolare, uso pseudo-inversa")
-        XtX_inv = np.linalg.pinv(X_with_bias.T @ X_with_bias)
-        H = X_with_bias @ XtX_inv @ X_with_bias.T
-        leverage = np.diag(H)
+        if verbose: print("⚠️ Matrice singolare rilevata, utilizzo la pseudo-inversa (Moore-Penrose)")
+        inverse_covariance_matrix = np.linalg.pinv(feature_matrix_with_intercept.T @ feature_matrix_with_intercept)
+        hat_matrix = feature_matrix_with_intercept @ inverse_covariance_matrix @ feature_matrix_with_intercept.T
+        leverage_scores = np.diag(hat_matrix)
     
     # -------------------------------------------------------------------------
-    # 2. Calcolo Residui e Studentized Residuals
+    # 2. Residui Studentizzati (Studentized Residuals)
     # -------------------------------------------------------------------------
-    # Fit modello lineare per calcolare residui
-    w = XtX_inv @ X_with_bias.T @ y
-    y_pred = X_with_bias @ w
-    residuals = y - y_pred
+    # Calcolo pesi (w) e predizioni del modello lineare base
+    linear_weights = inverse_covariance_matrix @ feature_matrix_with_intercept.T @ target_vector_y
+    target_predictions = feature_matrix_with_intercept @ linear_weights
+    prediction_errors = target_vector_y - target_predictions
     
-    # MSE (Mean Squared Error)
-    mse = np.sum(residuals**2) / (N - D - 1)
+    # Mean Squared Error
+    mean_squared_error = np.sum(prediction_errors**2) / (num_samples - num_features - 1)
     
-    # Studentized residuals: r_i* = e_i / (sigma * sqrt(1 - h_ii))
-    # dove sigma^2 = MSE
-    studentized_residuals = residuals / (np.sqrt(mse) * np.sqrt(1 - leverage))
-    
-    # -------------------------------------------------------------------------
-    # 3. Calcolo DFFITS (Difference in Fits)
-    # -------------------------------------------------------------------------
-    # DFFITS_i misura quanto cambia la predizione se rimuovo sample i
-    # Formula: DFFITS_i = r_i* * sqrt(h_ii / (1 - h_ii))
-    dffits = studentized_residuals * np.sqrt(leverage / (1 - leverage))
+    # Calcolo residui studentizzati (normalizzati rispetto al leverage)
+    studentized_residuals = prediction_errors / (np.sqrt(mean_squared_error) * np.sqrt(1 - leverage_scores))
     
     # -------------------------------------------------------------------------
-    # 4. Criteri di rilevamento (da appunti corso)
+    # 3. DFFITS (Difference in Fits)
     # -------------------------------------------------------------------------
-    # Criterio 1: Outlier nel target
-    outliers_residuals = np.abs(studentized_residuals) > 3
-    
-    # Criterio 2: High Leverage Point (HLP)
-    leverage_threshold = 3 * (D + 1) / N
-    high_leverage = leverage > leverage_threshold
-    
-    # Criterio 3: High Influence Point (HIP)
-    dffits_threshold = 2 * np.sqrt((D + 1) / N)
-    high_influence = np.abs(dffits) > dffits_threshold
-    
-    # Combina criteri: rimuovi se è OUTLIER E (HLP O HIP)
-    # Logica: outlier da solo non è problema, ma se ha anche high leverage/influence
-    # allora distorce il modello
-    outliers_combined = outliers_residuals & (high_leverage | high_influence)
-    
-    outlier_indices = np.where(outliers_combined)[0]
+    dffits_scores = studentized_residuals * np.sqrt(leverage_scores / (1 - leverage_scores))
     
     # -------------------------------------------------------------------------
-    # 5. Report
+    # 4. Applicazione Soglie Matematiche
+    # -------------------------------------------------------------------------
+    # Le soglie sono derivate dalla teoria statistica classica (Sez. 4.6)
+    is_residual_outlier = np.abs(studentized_residuals) > 3
+    
+    leverage_threshold = 3 * (num_features + 1) / num_samples
+    is_high_leverage_point = leverage_scores > leverage_threshold
+    
+    dffits_threshold = 2 * np.sqrt((num_features + 1) / num_samples)
+    is_high_influence_point = np.abs(dffits_scores) > dffits_threshold
+    
+    # Regola Decisionale: Un punto viene rimosso solo se ha un errore anomalo 
+    # E ALLO STESSO TEMPO altera pesantemente il modello (Leverage o Influenza alta)
+    is_critical_outlier = is_residual_outlier & (is_high_leverage_point | is_high_influence_point)
+    indices_to_drop = np.where(is_critical_outlier)[0]
+    
+    # -------------------------------------------------------------------------
+    # 5. Report Accademico
     # -------------------------------------------------------------------------
     if verbose:
-        print(f"\nDataset: N={N} samples, D={D} features")
-        print(f"\nSoglie (da appunti corso):")
-        print(f"   Studentized Residuals: |r_i*| > 3")
-        print(f"   Leverage: h_ii > {leverage_threshold:.4f}")
-        print(f"   DFFITS: |DFFITS_i| > {dffits_threshold:.4f}")
+        print(f"\nMetriche Dataset: {num_samples} Sample, {num_features} Features")
+        print(f"\nSoglie Teoriche Applicate:")
+        print(f"   Studentized Residuals (|r*|) : > 3.0")
+        print(f"   Leverage Threshold (h_ii)    : > {leverage_threshold:.4f}")
+        print(f"   DFFITS Threshold             : > {dffits_threshold:.4f}")
         
-        print(f"\nRisultati:")
-        print(f"   Outliers (residui): {outliers_residuals.sum()} ({outliers_residuals.sum()/N*100:.1f}%)")
-        print(f"   High Leverage Points: {high_leverage.sum()} ({high_leverage.sum()/N*100:.1f}%)")
-        print(f"   High Influence Points: {high_influence.sum()} ({high_influence.sum()/N*100:.1f}%)")
-        print(f"   → Outliers da rimuovere: {len(outlier_indices)} ({len(outlier_indices)/N*100:.1f}%)")
+        print(f"\nRisultati Analisi:")
+        print(f"   Outliers di Target (Residui) : {is_residual_outlier.sum()} ({is_residual_outlier.sum()/num_samples*100:.1f}%)")
+        print(f"   Punti di High Leverage (HLP) : {is_high_leverage_point.sum()} ({is_high_leverage_point.sum()/num_samples*100:.1f}%)")
+        print(f"   Punti di High Influence (HIP): {is_high_influence_point.sum()} ({is_high_influence_point.sum()/num_samples*100:.1f}%)")
+        print(f"   >>> OUTLIERS CRITICI DA RIMUOVERE: {len(indices_to_drop)} ({len(indices_to_drop)/num_samples*100:.1f}%)")
         
-        if len(outlier_indices) > 0 and len(outlier_indices) < 10:
-            print(f"\nIndici outliers: {outlier_indices.tolist()}")
-        
-        # Top 5 outliers più influenti
-        top_influence_idx = np.argsort(np.abs(dffits))[-5:][::-1]
-        print(f"\nTop 5 sample più influenti (DFFITS):")
-        print(f"   {'Index':<8} {'DFFITS':<12} {'Leverage':<12} {'Stud.Res.':<12}")
-        print(f"   {'-'*50}")
-        for idx in top_influence_idx:
-            print(f"   {idx:<8} {dffits[idx]:<12.4f} {leverage[idx]:<12.4f} {studentized_residuals[idx]:<12.4f}")
+        # Mostra i 5 sample peggiori per gravità DFFITS
+        top_influence_indices = np.argsort(np.abs(dffits_scores))[-5:][::-1]
+        print(f"\nTop 5 Sample più critici (ordinati per DFFITS):")
+        print(f"   {'Indice Dataset':<16} {'DFFITS Score':<15} {'Leverage':<15} {'Residuo Stud.':<15}")
+        print(f"   {'-'*65}")
+        for idx in top_influence_indices:
+            print(f"   {idx:<16} {dffits_scores[idx]:<15.4f} {leverage_scores[idx]:<15.4f} {studentized_residuals[idx]:<15.4f}")
     
     return {
-        'outlier_indices': outlier_indices,
+        'outlier_indices': indices_to_drop,
         'studentized_residuals': studentized_residuals,
-        'leverage': leverage,
-        'dffits': dffits,
+        'leverage': leverage_scores,
+        'dffits': dffits_scores,
         'summary': {
-            'n_outliers': len(outlier_indices),
-            'n_high_leverage': high_leverage.sum(),
-            'n_high_influence': high_influence.sum()
+            'n_outliers': len(indices_to_drop),
+            'n_high_leverage': is_high_leverage_point.sum(),
+            'n_high_influence': is_high_influence_point.sum()
         }
     }
 
 
-def remove_outliers(df, outlier_indices, verbose=True):
-    """
-    Rimuove outliers dal DataFrame.
-    
-    Args:
-        df: DataFrame
-        outlier_indices: Indici da rimuovere
-        verbose: Stampa report
-    
-    Returns:
-        DataFrame pulito
-    """
-    if len(outlier_indices) == 0:
-        if verbose:
-            print("\n✓ Nessun outlier da rimuovere")
+def remove_outliers(df, outlier_indices_array, verbose=True):
+    """Rimuove dal DataFrame le righe identificate come outliers critici."""
+    if len(outlier_indices_array) == 0:
+        if verbose: print("\n✓ Nessun outlier critico identificato. Dataset intatto.")
         return df
     
-    df_clean = df.drop(df.index[outlier_indices]).reset_index(drop=True)
+    cleaned_dataframe = df.drop(df.index[outlier_indices_array]).reset_index(drop=True)
     
     if verbose:
-        print(f"\n✓ Rimossi {len(outlier_indices)} outliers")
-        print(f"   Dataset: {len(df)} → {len(df_clean)} samples "
-              f"(-{len(outlier_indices)/len(df)*100:.1f}%)")
+        print(f"\n✓ Operazione di Pulizia completata: Rimossi {len(outlier_indices_array)} outliers critici.")
+        print(f"   Nuova dimensione Dataset: {len(df)} → {len(cleaned_dataframe)} sample validi.")
     
-    return df_clean
-
-
-
+    return cleaned_dataframe

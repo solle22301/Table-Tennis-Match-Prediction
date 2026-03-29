@@ -1,167 +1,142 @@
 """
-Modulo per la valutazione dei modelli di Machine Learning.
+Modulo per la valutazione statistica dei modelli di Machine Learning.
+
+Questo modulo si occupa di testare i modelli su dati mai visti prima (Test Set)
+per misurarne la reale capacità di generalizzazione.
 
 Metriche implementate:
-- Accuracy: percentuale predizioni corrette
-- Precision: dei positivi predetti, quanti sono corretti
-- Recall: dei positivi reali, quanti sono catturati
-- F1-Score: media armonica di precision e recall
-- Confusion Matrix: matrice errori per analisi dettagliata
+- Accuracy: Percentuale totale di predizioni corrette.
+- Precision: Delle partite in cui il modello ha predetto la vittoria del P1, quante erano corrette?
+- Recall: Di tutte le partite realmente vinte dal P1, quante ne ha individuate il modello?
+- F1-Score: Media armonica tra Precision e Recall (utile per valutazioni bilanciate).
+- Confusion Matrix: Mappa visiva degli errori (Falsi Positivi vs Falsi Negativi).
 """
 
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import os
 
 
 # ==============================================================================
-# VALUTAZIONE MODELLI
+# VALUTAZIONE METRICHE SUL TEST SET
 # ==============================================================================
 
-def evaluate_models(models, X_test, t_test):
+def evaluate_models(trained_models_dict, X_test_scaled, y_test):
     """
-    Valuta tutti i modelli sul test set e stampa metriche.
-    
-    Per ogni modello calcola:
-    - Accuracy: (TP + TN) / Total
-    - Precision per classe: TP / (TP + FP)
-    - Recall per classe: TP / (TP + FN)
-    - F1-Score per classe: 2 * (Precision * Recall) / (Precision + Recall)
-    
-    Dove:
-    - TP = True Positive, TN = True Negative
-    - FP = False Positive, FN = False Negative
+    Esegue il test finale di tutti i modelli addestrati.
     
     Args:
-        models (dict): Dizionario {nome_modello: modello_addestrato}
-        X_test (array): Features test normalizzate
-        t_test (array): Target test
+        trained_models_dict (dict): Dizionario {nome_modello: modello_addestrato}.
+        X_test_scaled (array): Matrice delle features di test normalizzate.
+        y_test (array): Vettore target reale del test set.
     
     Returns:
-        tuple: (results, best_model_name)
-               results = dict {nome: accuracy}
-               best_model_name = nome del modello con accuracy migliore
+        tuple: (accuracy_results_dict, best_performing_model_name)
     """
     print("\n" + "=" * 80)
-    print("EVALUATION - TEST SET")
+    print("EVALUATION FINALE SUL TEST SET")
     print("=" * 80)
     
-    results = {}
+    accuracy_results = {}
     
-    # Valuta ogni modello
-    for name, model in models.items():
-        # Predizioni sul test set
-        t_pred = model.predict(X_test)
+    # Itera su ogni modello addestrato
+    for model_name, model in trained_models_dict.items():
         
-        # Calcola accuracy
-        acc = accuracy_score(t_test, t_pred)
-        results[name] = acc
+        # Generazione delle predizioni
+        y_pred = model.predict(X_test_scaled)
         
-        # Stampa risultati
-        print(f"\n{name}:")
-        print(f"  Accuracy: {acc:.4f}")
+        # Calcolo dell'Accuracy complessiva
+        current_accuracy = accuracy_score(y_test, y_pred)
+        accuracy_results[model_name] = current_accuracy
         
-        # Classification report dettagliato
-        # Mostra precision, recall, f1-score per ogni classe
+        print(f"\n{model_name}:")
+        print(f"  Accuracy: {current_accuracy:.4f}")
+        
+        # Stampa del report dettagliato (Precision, Recall, F1)
         print(classification_report(
-            t_test, t_pred,
-            target_names=['Player 2 Wins', 'Player 1 Wins'],
-            digits=2
+            y_test, 
+            y_pred,
+            target_names=['Player 2 Wins (0)', 'Player 1 Wins (1)'],
+            digits=4
         ))
     
-    # Identifica miglior modello
-    best_model_name = max(results, key=results.get)
+    # Identificazione del modello con l'Accuracy più alta sul Test Set
+    best_model_name = max(accuracy_results, key=accuracy_results.get)
     
     print("=" * 80)
-    print(f"MIGLIOR MODELLO: {best_model_name}")
-    print(f"Accuracy: {results[best_model_name]:.4f}")
+    print(f"🏆 MIGLIOR MODELLO SUL TEST SET: {best_model_name}")
+    print(f"   Accuracy Finale: {accuracy_results[best_model_name]:.4f}")
     print("=" * 80)
     
-    return results, best_model_name
+    return accuracy_results, best_model_name
 
 
 # ==============================================================================
-# CONFUSION MATRIX
+# ANALISI DEGLI ERRORI: CONFUSION MATRIX
 # ==============================================================================
 
-def plot_confusion_matrix(model, X_test, t_test, model_name):
+def plot_confusion_matrix(best_model, X_test_scaled, y_test, model_name):
     """
-    Visualizza confusion matrix del modello.
+    Genera e salva la matrice di confusione per analizzare il tipo di errori
+    commessi dal miglior modello.
     
-    Confusion Matrix:
-    
-                      Predicted
-                   P2 Wins  P1 Wins
-    Actual P2 Wins    TN       FP
-           P1 Wins    FN       TP
-    
-    Dove:
-    - TN (True Negative): predetto P2 vince, effettivo P2 vince ✓
-    - FP (False Positive): predetto P1 vince, effettivo P2 vince ✗
-    - FN (False Negative): predetto P2 vince, effettivo P1 vince ✗
-    - TP (True Positive): predetto P1 vince, effettivo P1 vince ✓
-    
-    Utile per:
-    - Identificare tipo di errori (FP vs FN)
-    - Capire se modello è biased verso una classe
-    - Analizzare pattern di errore
-    
-    Args:
-        model: Modello addestrato
-        X_test (array): Features test
-        t_test (array): Target test
-        model_name (str): Nome del modello per titolo e filename
-    
-    Output:
-        Salva grafico 'confusion_matrix_{model_name}.png'
+    Struttura della Matrice (Target 1 = Player 1 Wins):
+                 | Predetto P2 (0) | Predetto P1 (1) |
+    -------------|-----------------|-----------------|
+    Reale P2 (0) | True Negative   | False Positive  |
+    -------------|-----------------|-----------------|
+    Reale P1 (1) | False Negative  | True Positive   |
     """
-    # Predizioni
-    t_pred = model.predict(X_test)
+    # Generazione predizioni
+    y_pred = best_model.predict(X_test_scaled)
     
-    # Calcola confusion matrix
-    cm = confusion_matrix(t_test, t_pred)
+    # Calcolo della matrice
+    cm = confusion_matrix(y_test, y_pred)
+    
+    # Estrazione dei 4 quadranti per l'analisi numerica
+    true_negatives, false_positives, false_negatives, true_positives = cm.ravel()
     
     # -------------------------------------------------------------------------
-    # Visualizzazione con heatmap
+    # Visualizzazione Grafica (Heatmap)
     # -------------------------------------------------------------------------
     plt.figure(figsize=(8, 6))
     
-    # Heatmap con annotazioni
     sns.heatmap(cm, 
-                annot=True,              # mostra numeri nelle celle
-                fmt='d',                 # formato integer
-                cmap='Blues',            # colormap blu
-                xticklabels=['Player 2 Wins', 'Player 1 Wins'],
-                yticklabels=['Player 2 Wins', 'Player 1 Wins'],
-                cbar_kws={'label': 'Numero Partite'})
+                annot=True,              # Mostra i numeri dentro le celle
+                fmt='d',                 # Formato intero (no decimali)
+                cmap='Blues',            # Scala di blu
+                xticklabels=['Predetto P2 Vince', 'Predetto P1 Vince'],
+                yticklabels=['Reale P2 Vince', 'Reale P1 Vince'],
+                cbar_kws={'label': 'Numero di Partite'})
     
-    plt.title(f'Confusion Matrix - {model_name}', fontweight='bold', fontsize=13)
-    plt.ylabel('True Label', fontsize=11)
-    plt.xlabel('Predicted Label', fontsize=11)
+    plt.title(f'Matrice di Confusione - {model_name}', fontweight='bold', fontsize=13)
+    plt.xlabel('Predizione del Modello', fontsize=11)
+    plt.ylabel('Risultato Reale', fontsize=11)
     plt.tight_layout()
     
-    # Salva grafico
-    filename = f'confusion_matrix_{model_name.replace(" ", "_")}.png'
-    plt.savefig(filename, dpi=150)
-    print(f"\n✓ Confusion matrix salvata: {filename}")
+    # Esportazione del file
+    safe_filename = model_name.replace(" ", "_").lower()
+    # Unisco la cartella "plots" al nome del file dinamico
+    export_path = os.path.join("plots", f'confusion_matrix_{safe_filename}.png')
+    plt.savefig(export_path, dpi=150)
+    print(f"\n✓ Matrice di Confusione esportata: {export_path}")
     plt.show()
     
     # -------------------------------------------------------------------------
-    # Analisi numerica confusion matrix
+    # Report Analitico degli Errori
     # -------------------------------------------------------------------------
-    tn, fp, fn, tp = cm.ravel()
+    print("\nAnalisi degli Errori (Confusion Matrix):")
+    print(f"   True Negatives (TN):  {true_negatives} -> Predetto P2, ha vinto P2 ✓")
+    print(f"   True Positives (TP):  {true_positives} -> Predetto P1, ha vinto P1 ✓")
+    print(f"   False Positives (FP): {false_positives} -> Predetto P1, ma ha vinto P2 ❌ (Errore Tipo I)")
+    print(f"   False Negatives (FN): {false_negatives} -> Predetto P2, ma ha vinto P1 ❌ (Errore Tipo II)")
     
-    print("\nAnalisi Confusion Matrix:")
-    print(f"   True Negatives (TN):  {tn} - Predetto P2, effettivo P2 ✓")
-    print(f"   False Positives (FP): {fp} - Predetto P1, effettivo P2 ✗")
-    print(f"   False Negatives (FN): {fn} - Predetto P2, effettivo P1 ✗")
-    print(f"   True Positives (TP):  {tp} - Predetto P1, effettivo P1 ✓")
+    # Calcolo dei tassi di errore
+    false_positive_rate = false_positives / (false_positives + true_negatives) if (false_positives + true_negatives) > 0 else 0
+    false_negative_rate = false_negatives / (false_negatives + true_positives) if (false_negatives + true_positives) > 0 else 0
     
-    # Calcola tassi di errore
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0  # False Positive Rate
-    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0  # False Negative Rate
-    
-    print(f"\nTassi di errore:")
-    print(f"   False Positive Rate: {fpr*100:.2f}%")
-    print(f"   False Negative Rate: {fnr*100:.2f}%")
+    print(f"\nTassi di Errore Specifici:")
+    print(f"   False Positive Rate (FPR): {false_positive_rate*100:.2f}% (Quante volte si sbaglia dando favorito il P1)")
+    print(f"   False Negative Rate (FNR): {false_negative_rate*100:.2f}% (Quante volte si sbaglia dando favorito il P2)")

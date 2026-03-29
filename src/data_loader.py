@@ -1,86 +1,87 @@
 """
-Modulo per il caricamento e la validazione dei dataset.
+Modulo per l'Ingestione e la Validazione dei Dati (Data Loading).
 
-Questo modulo gestisce:
-- Caricamento file CSV
-- Validazione colonne obbligatorie
-- Conversione tipi di dato
-- Ordinamento temporale
+Questo modulo costituisce il primo step della pipeline. Si occupa di:
+1. Caricare i file CSV contenenti lo storico delle partite e i punteggi ELO.
+2. Validare l'integrità strutturale dei file (presenza delle colonne obbligatorie).
+3. Garantire l'ordine cronologico degli eventi (Fondamentale per prevenire il Data Leakage).
 """
 
 import pandas as pd
 import os
 
-
 # ==============================================================================
-# CARICAMENTO DATI
+# DATA INGESTION & VALIDATION
 # ==============================================================================
 
-def load_data(matches_file, ranking_file):
+def load_data(matches_file_path, ranking_file_path):
     """
-    Carica i due dataset CSV del progetto.
+    Carica i due dataset in memoria, ne verifica la correttezza strutturale 
+    e imposta l'asse temporale corretto per le analisi successive.
     
     Args:
-        matches_file (str): Path del file con le partite
-        ranking_file (str): Path del file con i ranking ELO
+        matches_file_path (str): Percorso del file CSV contenente i risultati dei match.
+        ranking_file_path (str): Percorso del file CSV contenente il ranking ELO ufficiale.
     
     Returns:
-        tuple: (df_matches, df_ranking) - DataFrame delle partite e del ranking
+        tuple: (matches_dataset, ranking_dataset) - I due DataFrame pronti per il preprocessing.
     
     Raises:
-        ValueError: Se i file sono vuoti o mancano colonne obbligatorie
+        ValueError: Se i file risultano vuoti o privi delle colonne necessarie.
     """
     print("=" * 80)
-    print("CARICAMENTO DATASET")
+    print("FASE 1: CARICAMENTO E VALIDAZIONE DATASET")
     print("=" * 80)
     
     # --------------------------------------------------------------------------
-    # Caricamento file partite
+    # 1. Caricamento e Validazione File Partite
     # --------------------------------------------------------------------------
-    print(f"\nCaricamento file partite: {matches_file}")
-    df_matches = pd.read_csv(matches_file)
+    print(f"\nLettura file storico partite: {matches_file_path}")
+    matches_dataset = pd.read_csv(matches_file_path)
     
-    # Validazione: file non vuoto
-    if len(df_matches) == 0:
-        raise ValueError("ERRORE: File partite vuoto")
+    # Controllo di integrità: il file contiene dati?
+    if len(matches_dataset) == 0:
+        raise ValueError("ERRORE CRITICO: Il file delle partite è completamente vuoto.")
     
-    # Validazione: colonne obbligatorie presenti
-    required_cols = ['player_1', 'player_2', 'winner', 'date', 
-                     'player_1_sets_won', 'player_2_sets_won']
-    missing = [col for col in required_cols if col not in df_matches.columns]
-    if missing:
-        raise ValueError(f"ERRORE: Colonne mancanti nel file partite: {missing}")
+    # Controllo strutturale: ci sono tutte le informazioni necessarie?
+    required_match_columns = ['player_1', 'player_2', 'winner', 'date', 
+                              'player_1_sets_won', 'player_2_sets_won']
+    missing_match_columns = [col for col in required_match_columns if col not in matches_dataset.columns]
     
-    # Conversione colonna date in datetime per ordinamento temporale
-    df_matches['date'] = pd.to_datetime(df_matches['date'])
+    if missing_match_columns:
+        raise ValueError(f"ERRORE CRITICO: Mancano colonne fondamentali nel file partite: {missing_match_columns}")
     
-    # Ordinamento per data (IMPORTANTE per rolling features)
-    df_matches = df_matches.sort_values('date').reset_index(drop=True)
+    # Cast del tipo di dato: converte la stringa di testo in un oggetto DateTime reale
+    matches_dataset['date'] = pd.to_datetime(matches_dataset['date'])
     
-    # Statistiche caricamento
-    print(f"✓ File partite caricato: {len(df_matches)} righe")
-    print(f"  Periodo: {df_matches['date'].min().strftime('%Y-%m-%d')} → "
-          f"{df_matches['date'].max().strftime('%Y-%m-%d')}")
+    # ORDINAMENTO CRONOLOGICO (Cruciale per l'Ingegneria delle Features)
+    # Assicura che la riga 0 sia la partita più vecchia in assoluto, in modo che la 
+    # Rolling Window scorra il tempo in avanti senza mai rischiare di guardare al futuro.
+    matches_dataset = matches_dataset.sort_values('date').reset_index(drop=True)
+    
+    print(f"   ✓ File partite acquisito: {len(matches_dataset)} record elaborati.")
+    print(f"     Finestra Temporale: {matches_dataset['date'].min().strftime('%Y-%m-%d')} → "
+          f"{matches_dataset['date'].max().strftime('%Y-%m-%d')}")
     
     # --------------------------------------------------------------------------
-    # Caricamento file ranking
+    # 2. Caricamento e Validazione File Ranking ELO
     # --------------------------------------------------------------------------
-    print(f"\nCaricamento file ranking: {ranking_file}")
-    df_ranking = pd.read_csv(ranking_file)
+    print(f"\nLettura file ranking ufficiale: {ranking_file_path}")
+    ranking_dataset = pd.read_csv(ranking_file_path)
     
-    # Validazione: file non vuoto
-    if len(df_ranking) == 0:
-        raise ValueError("ERRORE: File ranking vuoto")
+    # Controllo di integrità
+    if len(ranking_dataset) == 0:
+        raise ValueError("ERRORE CRITICO: Il file del ranking ELO è vuoto.")
     
-    # Validazione: colonne obbligatorie presenti
-    required_cols = ['Nome Giocatore', 'Rating ELO']
-    missing = [col for col in required_cols if col not in df_ranking.columns]
-    if missing:
-        raise ValueError(f"ERRORE: Colonne mancanti nel file ranking: {missing}")
+    # Controllo strutturale
+    required_ranking_columns = ['Nome Giocatore', 'Rating ELO']
+    missing_ranking_columns = [col for col in required_ranking_columns if col not in ranking_dataset.columns]
     
-    # Statistiche caricamento
-    print(f"✓ File ranking caricato: {len(df_ranking)} giocatori")
-    print(f"  Range ELO: {df_ranking['Rating ELO'].min():.0f} → "
-          f"{df_ranking['Rating ELO'].max():.0f}")
+    if missing_ranking_columns:
+        raise ValueError(f"ERRORE CRITICO: Mancano colonne fondamentali nel file ranking: {missing_ranking_columns}")
     
-    return df_matches, df_ranking
+    print(f"   ✓ File ranking acquisito: {len(ranking_dataset)} atleti censiti.")
+    print(f"     Distribuzione ELO: {ranking_dataset['Rating ELO'].min():.0f} (Min) → "
+          f"{ranking_dataset['Rating ELO'].max():.0f} (Max)")
+    
+    return matches_dataset, ranking_dataset

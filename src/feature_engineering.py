@@ -1,16 +1,17 @@
 """
-Modulo per la creazione delle features con rolling window.
+Modulo per la creazione delle features predittive tramite Rolling Window.
 
 Principio fondamentale: ZERO DATA LEAKAGE
-Per ogni partita N, calcola features guardando SOLO partite da 1 a N-1.
-Questo garantisce che il modello non "veda il futuro" durante il training.
+Per calcolare le statistiche di una partita all'indice N, il sistema 
+interroga ESCLUSIVAMENTE le partite comprese tra l'indice 0 e N-1.
+Questo garantisce che il modello operi in uno stato di incertezza reale,
+senza mai "vedere" i risultati futuri.
 
-Features create (12 totali - VERSIONE OTTIMIZZATA):
-1. Ranking (3): ELO individuali, differenza (rimosso elo_sum - correlazione 0.01)
-2. Win Rate (2): % vittorie ultime 5 (rimosso overall - VIF 17, ridondante)
-3. Head-to-Head (3): vittorie P1, P2, ratio dominanza
-4. Momentum (2): streak vittorie/sconfitte consecutive
-5. Volatilità (2): consistenza performance ultime 5 partite
+Le 10 Features create sono divise in 4 categorie logiche:
+1. Ranking: Differenza matematica di ELO (elo_diff)
+2. Stato di Forma: Win rate percentuale sulle ultime 5 partite
+3. Scontri Diretti (Head-to-Head): Vittorie storiche assolute e ratio di supremazia
+4. Inerzia Psicologica: Strisce di vittorie consecutive (streak) e volatilità
 """
 
 import pandas as pd
@@ -22,48 +23,35 @@ import numpy as np
 
 def create_features(df):
     """
-    Crea tutte le features del modello usando rolling window.
+    Costruisce la matrice delle features evitando il data leakage temporale.
     
-    IMPORTANTE: Evita data leakage usando solo dati storici precedenti.
-    
-    Per ogni partita all'indice N:
-    - Calcola statistiche usando SOLO partite da indice 0 a N-1
-    - Aggiorna statistiche DOPO aver salvato le features
+    Flusso logico per ogni partita (N):
+    1. Legge le statistiche storiche aggiornate fino alla partita N-1
+    2. Salva queste statistiche come "features" per la partita N
+    3. SCOPRE il risultato della partita N
+    4. Aggiorna le statistiche storiche includendo il nuovo risultato
     
     Args:
-        df (DataFrame): Dataset con colonne player_1, player_2, winner, 
-                       player_1_elo, player_2_elo
+        df (DataFrame): Dataset ordinato cronologicamente con colonne 
+                        player_1, player_2, winner, player_1_elo, player_2_elo
     
     Returns:
-        DataFrame: Dataset originale con 12 nuove colonne features
-    
-    Note:
-        Operazione computazionalmente intensiva O(n²) ma necessaria
-        per garantire zero data leakage. Progress ogni 1000 partite.
+        DataFrame: Il dataset originale arricchito con le 10 nuove features
     """
     print("\n" + "=" * 80)
     print("FEATURE ENGINEERING")
     print("=" * 80)
-    print("\nCreazione features con rolling window...")
-    print("Nota: Per ogni partita uso SOLO dati storici precedenti")
+    print("\nCreazione features con approccio Rolling Window...")
+    print("Garanzia Zero Data Leakage: in elaborazione...")
     
     # --------------------------------------------------------------------------
-    # Inizializzazione colonne features
+    # 1. Inizializzazione colonne features
     # --------------------------------------------------------------------------
     feature_cols = [
-        # Ranking features (1 - rimosso elo_sum)
-        'elo_diff',  # Differenza ELO: feature più predittiva
-        
-        # Win rate features (2 - rimosso overall, mantengo solo last5)
+        'elo_diff',
         'p1_win_rate_last5', 'p2_win_rate_last5',
-        
-        # Head-to-head features (3 - aggiunto h2h_ratio)
-        'h2h_p1_wins', 'h2h_p2_wins', 'h2h_ratio',
-        
-        # Momentum features (2)
+        'p1_head_to_head_wins', 'p2_head_to_head_wins', 'p1_head_to_head_win_ratio',
         'p1_streak', 'p2_streak',
-        
-        # Volatilità/Consistenza (2)
         'p1_form_volatility', 'p2_form_volatility'
     ]
     
@@ -71,204 +59,149 @@ def create_features(df):
         df[col] = 0.0
     
     # --------------------------------------------------------------------------
-    # Dizionari per tracking statistiche storiche
+    # 2. Strutture dati per la memoria storica
     # --------------------------------------------------------------------------
     
-    # player_stats: statistiche per singolo giocatore
-    # Struttura: {nome: {'wins': X, 'total': Y, 'last_results': [1,0,1], 'streak': Z}}
+    # player_stats: Dizionario che ricorda le performance passate di ogni singolo giocatore.
+    # Salveremo quante partite ha vinto, quante ne ha giocate, la lista esatta dei risultati recenti e la sua striscia attuale.
     player_stats = {}
     
-    # h2h_stats: statistiche scontri diretti
-    # Struttura: {(player_a, player_b): {'p1_wins': X, 'p2_wins': Y}}
-    # Uso tupla ordinata (min, max) come chiave per simmetria
-    h2h_stats = {}
+    # head_to_head_history: Dizionario che ricorda l'esito degli scontri diretti tra due specifici giocatori.
+    # Nota: Usiamo sempre una tupla ordinata alfabeticamente (es. (Alice, Bob)) per evitare di contare la stessa coppia due volte.
+    head_to_head_history = {}
     
     total_matches = len(df)
     
     # --------------------------------------------------------------------------
-    # Loop principale: itera su ogni partita
+    # 3. Motore Rolling Window: Iterazione cronologica
     # --------------------------------------------------------------------------
     for idx, row in df.iterrows():
-        p1 = row['player_1_clean']
-        p2 = row['player_2_clean']
-        winner = row['winner']
+        # Estraiamo i nomi puliti e il vincitore della riga attuale
+        player_1_name = row['player_1_clean']
+        player_2_name = row['player_2_clean']
+        match_winner = row['winner']
         
-        # Progress indicator ogni 1000 partite
         if idx % 1000 == 0:
-            print(f"  Processate {idx}/{total_matches} partite "
-                  f"({idx/total_matches*100:.0f}%)")
+            print(f"   Processate {idx}/{total_matches} partite ({idx/total_matches*100:.0f}%)")
         
-        # Inizializza dizionari per nuovi giocatori
-        if p1 not in player_stats:
-            player_stats[p1] = {'wins': 0, 'total': 0, 'last_results': [], 'streak': 0}
-        if p2 not in player_stats:
-            player_stats[p2] = {'wins': 0, 'total': 0, 'last_results': [], 'streak': 0}
+        # Se incontriamo questi giocatori per la prima volta, creiamo la loro "scheda" vuota
+        if player_1_name not in player_stats:
+            player_stats[player_1_name] = {'total_wins': 0, 'total_matches_played': 0, 'match_results_history': [], 'current_streak': 0}
+        if player_2_name not in player_stats:
+            player_stats[player_2_name] = {'total_wins': 0, 'total_matches_played': 0, 'match_results_history': [], 'current_streak': 0}
         
-        # ----------------------------------------------------------------------
-        # CATEGORIA 1: RANKING FEATURES (1 feature - ottimizzato)
-        # ----------------------------------------------------------------------
-        # Differenza ELO: LA feature più predittiva (correlazione 0.26 con target)
-        # Misura la forza relativa tra i due giocatori
-        # Positiva = P1 più forte, Negativa = P2 più forte
+        # ======================================================================
+        # FASE A: ESTRAZIONE FEATURES (Sulla base del solo passato)
+        # ======================================================================
+        
+        # -- CATEGORIA 1: RANKING --
+        # Differenza matematica tra i due ELO. Se è positiva, il P1 è favorito sulla carta.
         df.at[idx, 'elo_diff'] = row['player_1_elo'] - row['player_2_elo']
         
-        # NOTA: elo_sum RIMOSSA (correlazione 0.01, inutile)
-        # player_1_elo e player_2_elo GIÀ presenti dal merge
+        # -- CATEGORIA 2: STATO DI FORMA RECENTE --
+        # history_p1: Lista temporanea che contiene solo i risultati (1=vinta, 0=persa) delle partite passate del P1
+        history_p1 = player_stats[player_1_name]['match_results_history']
         
-        # ----------------------------------------------------------------------
-        # CATEGORIA 2: WIN RATE LAST 5 (2 features - ottimizzato)
-        # ----------------------------------------------------------------------
-        # Percentuale vittorie ultime 5 partite (forma recente)
-        # NOTA: win_rate_overall RIMOSSA (VIF 17, troppo correlata con last5)
-        # NOTA: recent_form (ultime 3) RIMOSSA (VIF 15, ridondante con last5)
-        
-        # Player 1 - Win rate ultime 5
-        if len(player_stats[p1]['last_results']) >= 5:
-            # Se ha almeno 5 partite, prendi esattamente le ultime 5
-            df.at[idx, 'p1_win_rate_last5'] = (
-                sum(player_stats[p1]['last_results'][-5:]) / 5
-            )
-        elif len(player_stats[p1]['last_results']) > 0:
-            # Se ha meno di 5 partite, usa tutte quelle disponibili
-            df.at[idx, 'p1_win_rate_last5'] = (
-                sum(player_stats[p1]['last_results']) / 
-                len(player_stats[p1]['last_results'])
-            )
-        # else: rimane 0.0 (giocatore debutta)
-        
-        # Player 2 - Win rate ultime 5 (stessa logica)
-        if len(player_stats[p2]['last_results']) >= 5:
-            df.at[idx, 'p2_win_rate_last5'] = (
-                sum(player_stats[p2]['last_results'][-5:]) / 5
-            )
-        elif len(player_stats[p2]['last_results']) > 0:
-            df.at[idx, 'p2_win_rate_last5'] = (
-                sum(player_stats[p2]['last_results']) / 
-                len(player_stats[p2]['last_results'])
-            )
-        
-        # ----------------------------------------------------------------------
-        # CATEGORIA 3: HEAD-TO-HEAD (3 features - aggiunto h2h_ratio)
-        # ----------------------------------------------------------------------
-        # Storico scontri diretti tra i due giocatori specifici
-        
-        # Crea chiave ordinata per simmetria: sempre (min, max)
-        # Es: (Alice, Bob) e (Bob, Alice) → stessa chiave (Alice, Bob)
-        h2h_key = (p1, p2) if p1 < p2 else (p2, p1)
-        
-        if h2h_key in h2h_stats:
-            # Gestisci inversione chiave per estrarre vittorie corrette
-            if h2h_key == (p1, p2):
-                # Chiave non invertita: p1 è effettivamente il primo
-                df.at[idx, 'h2h_p1_wins'] = h2h_stats[h2h_key]['p1_wins']
-                df.at[idx, 'h2h_p2_wins'] = h2h_stats[h2h_key]['p2_wins']
-            else:
-                # Chiave invertita: scambia i contatori
-                df.at[idx, 'h2h_p1_wins'] = h2h_stats[h2h_key]['p2_wins']
-                df.at[idx, 'h2h_p2_wins'] = h2h_stats[h2h_key]['p1_wins']
+        # Calcolo Win Rate per il Player 1
+        if len(history_p1) >= 5:
+            # Se ha giocato almeno 5 partite, calcoliamo la media esatta sulle ultime 5
+            df.at[idx, 'p1_win_rate_last5'] = sum(history_p1[-5:]) / 5
+        elif len(history_p1) > 0:
+            # Se ne ha giocate meno di 5, facciamo la media su quelle disponibili
+            df.at[idx, 'p1_win_rate_last5'] = sum(history_p1) / len(history_p1)
             
-            # NUOVA FEATURE: H2H Ratio (rapporto normalizzato)
-            # Misura la dominanza negli scontri diretti
-            # Range: 0 (P1 ha sempre perso) a 1 (P1 ha sempre vinto)
-            # 0.5 = equilibrio perfetto
-            total_h2h = df.at[idx, 'h2h_p1_wins'] + df.at[idx, 'h2h_p2_wins']
-            if total_h2h > 0:
-                df.at[idx, 'h2h_ratio'] = df.at[idx, 'h2h_p1_wins'] / total_h2h
-            # else: rimane 0.0 (mai affrontati prima)
+        # history_p2: Stessa lista temporanea per i risultati passati del P2
+        history_p2 = player_stats[player_2_name]['match_results_history']
         
-        # ----------------------------------------------------------------------
-        # CATEGORIA 4: MOMENTUM / STREAK (2 features)
-        # ----------------------------------------------------------------------
-        # Numero di vittorie/sconfitte consecutive
-        # Valori positivi = streak vittorie, negativi = streak sconfitte
-        # Es: +3 = 3 vittorie consecutive, -2 = 2 sconfitte consecutive
-        df.at[idx, 'p1_streak'] = player_stats[p1]['streak']
-        df.at[idx, 'p2_streak'] = player_stats[p2]['streak']
+        # Calcolo Win Rate per il Player 2
+        if len(history_p2) >= 5:
+            df.at[idx, 'p2_win_rate_last5'] = sum(history_p2[-5:]) / 5
+        elif len(history_p2) > 0:
+            df.at[idx, 'p2_win_rate_last5'] = sum(history_p2) / len(history_p2)
+            
+        # -- CATEGORIA 3: SCONTRI DIRETTI (HEAD-TO-HEAD) --
+        # players_matchup_key: È la chiave (tupla ordinata) per cercare questa esatta sfida nel dizionario storico
+        players_matchup_key = (player_1_name, player_2_name) if player_1_name < player_2_name else (player_2_name, player_1_name)
         
-        # ----------------------------------------------------------------------
-        # CATEGORIA 5: VOLATILITÀ/CONSISTENZA (2 features)
-        # ----------------------------------------------------------------------
-        # Deviazione standard dei risultati delle ultime 5 partite
-        # Misura quanto è STABILE la performance del giocatore
-        # Volatilità alta = altalenante (oggi vince, domani perde)
-        # Volatilità bassa = consistente (performance prevedibile)
-        
-        # Player 1 - Form Volatility
-        if len(player_stats[p1]['last_results']) >= 3:
-            # Serve almeno 3 partite per calcolare std significativa
-            last_results_p1 = player_stats[p1]['last_results'][-5:]
-            df.at[idx, 'p1_form_volatility'] = np.std(last_results_p1)
-        # else: rimane 0.0 (poche partite, volatilità indefinibile)
-        
-        # Player 2 - Form Volatility (stessa logica)
-        if len(player_stats[p2]['last_results']) >= 3:
-            last_results_p2 = player_stats[p2]['last_results'][-5:]
-            df.at[idx, 'p2_form_volatility'] = np.std(last_results_p2)
-        
-        # ----------------------------------------------------------------------
-        # AGGIORNAMENTO STATISTICHE (DOPO calcolo features - FONDAMENTALE!)
-        # ----------------------------------------------------------------------
-        # Questo blocco viene eseguito DOPO aver salvato tutte le features
-        # così garantiamo che ogni partita usi SOLO info dal passato
-        
-        # Determina vincitore della partita corrente
-        p1_won = 1 if winner == row['player_1'] else 0
-        p2_won = 1 - p1_won
-        
-        # Update statistiche overall (totale vittorie e partite giocate)
-        player_stats[p1]['wins'] += p1_won
-        player_stats[p1]['total'] += 1
-        player_stats[p1]['last_results'].append(p1_won)
-        
-        player_stats[p2]['wins'] += p2_won
-        player_stats[p2]['total'] += 1
-        player_stats[p2]['last_results'].append(p2_won)
-        
-        # Update streak (striscia vittorie/sconfitte consecutive)
-        # Logica:
-        # - Se P1 vince: incrementa streak positivo (o resetta da negativo a +1)
-        # - Se P1 perde: incrementa streak negativo (o resetta da positivo a -1)
-        if p1_won:
-            player_stats[p1]['streak'] = max(0, player_stats[p1]['streak']) + 1
-            player_stats[p2]['streak'] = min(0, player_stats[p2]['streak']) - 1
-        else:
-            player_stats[p2]['streak'] = max(0, player_stats[p2]['streak']) + 1
-            player_stats[p1]['streak'] = min(0, player_stats[p1]['streak']) - 1
-        
-        # Update head-to-head (storico scontri diretti)
-        if h2h_key not in h2h_stats:
-            h2h_stats[h2h_key] = {'p1_wins': 0, 'p2_wins': 0}
-        
-        # Incrementa contatore vittorie del vincitore
-        # Gestisci correttamente chiave ordinata
-        if h2h_key == (p1, p2):
-            # Chiave non invertita
-            if p1_won:
-                h2h_stats[h2h_key]['p1_wins'] += 1
+        if players_matchup_key in head_to_head_history:
+            if players_matchup_key == (player_1_name, player_2_name):
+                # Se l'ordine alfabetico combacia con l'ordine delle colonne (P1, P2), assegniamo i valori direttamente
+                df.at[idx, 'p1_head_to_head_wins'] = head_to_head_history[players_matchup_key]['p1_wins']
+                df.at[idx, 'p2_head_to_head_wins'] = head_to_head_history[players_matchup_key]['p2_wins']
             else:
-                h2h_stats[h2h_key]['p2_wins'] += 1
+                # Altrimenti, scambiamo i valori per assegnare le vittorie al giocatore giusto
+                df.at[idx, 'p1_head_to_head_wins'] = head_to_head_history[players_matchup_key]['p2_wins']
+                df.at[idx, 'p2_head_to_head_wins'] = head_to_head_history[players_matchup_key]['p1_wins']
+            
+            # total_head_to_head_matches: Quante volte si sono già affrontati prima di oggi?
+            total_head_to_head_matches = df.at[idx, 'p1_head_to_head_wins'] + df.at[idx, 'p2_head_to_head_wins']
+            if total_head_to_head_matches > 0:
+                # Calcoliamo la percentuale di dominio del Player 1 (es. 0.75 significa che P1 ha vinto il 75% delle volte)
+                df.at[idx, 'p1_head_to_head_win_ratio'] = df.at[idx, 'p1_head_to_head_wins'] / total_head_to_head_matches
+                
+        # -- CATEGORIA 4: MOMENTUM E STREAK --
+        # current_streak: Quante partite di fila sta vincendo (numero positivo) o perdendo (numero negativo) il giocatore?
+        df.at[idx, 'p1_streak'] = player_stats[player_1_name]['current_streak']
+        df.at[idx, 'p2_streak'] = player_stats[player_2_name]['current_streak']
+        
+        # -- CATEGORIA 5: VOLATILITÀ (CONSISTENZA) --
+        # Calcoliamo la deviazione standard per capire se i risultati sono costanti o altalenanti.
+        # Richiede un minimo di 3 partite giocate per avere un senso matematico.
+        if len(history_p1) >= 3:
+            df.at[idx, 'p1_form_volatility'] = np.std(history_p1[-5:])
+            
+        if len(history_p2) >= 3:
+            df.at[idx, 'p2_form_volatility'] = np.std(history_p2[-5:])
+        
+        # ======================================================================
+        # FASE B: AGGIORNAMENTO MEMORIA STORICA (Il presente diventa passato)
+        # ======================================================================
+        # NOTA BENE: Questo blocco aggiorna i dizionari e DEVE girare rigorosamente 
+        # DOPO aver calcolato le features, per evitare che il modello veda il futuro.
+        
+        # is_player_1_winner: Variabile booleana che vale 1 se il Player 1 ha vinto, 0 se ha perso
+        is_player_1_winner = 1 if match_winner == row['player_1'] else 0
+        is_player_2_winner = 1 - is_player_1_winner
+        
+        # 1. Aggiorna contatori globali e storico risultati
+        player_stats[player_1_name]['total_wins'] += is_player_1_winner
+        player_stats[player_1_name]['total_matches_played'] += 1
+        player_stats[player_1_name]['match_results_history'].append(is_player_1_winner)
+        
+        player_stats[player_2_name]['total_wins'] += is_player_2_winner
+        player_stats[player_2_name]['total_matches_played'] += 1
+        player_stats[player_2_name]['match_results_history'].append(is_player_2_winner)
+        
+        # 2. Aggiorna Momentum (Streak)
+        if is_player_1_winner:
+            # Se P1 vince: aumenta la sua striscia positiva. Azzera e manda in negativo quella del P2.
+            player_stats[player_1_name]['current_streak'] = max(0, player_stats[player_1_name]['current_streak']) + 1
+            player_stats[player_2_name]['current_streak'] = min(0, player_stats[player_2_name]['current_streak']) - 1
         else:
-            # Chiave invertita: scambia contatori
-            if p1_won:
-                h2h_stats[h2h_key]['p2_wins'] += 1
-            else:
-                h2h_stats[h2h_key]['p1_wins'] += 1
-    
+            player_stats[player_2_name]['current_streak'] = max(0, player_stats[player_2_name]['current_streak']) + 1
+            player_stats[player_1_name]['current_streak'] = min(0, player_stats[player_1_name]['current_streak']) - 1
+            
+        # 3. Aggiorna storico scontri diretti
+        if players_matchup_key not in head_to_head_history:
+            head_to_head_history[players_matchup_key] = {'p1_wins': 0, 'p2_wins': 0}
+            
+        if players_matchup_key == (player_1_name, player_2_name):
+            if is_player_1_winner: head_to_head_history[players_matchup_key]['p1_wins'] += 1
+            else:                  head_to_head_history[players_matchup_key]['p2_wins'] += 1
+        else:
+            if is_player_1_winner: head_to_head_history[players_matchup_key]['p2_wins'] += 1
+            else:                  head_to_head_history[players_matchup_key]['p1_wins'] += 1
+            
     # --------------------------------------------------------------------------
     # Riepilogo finale
     # --------------------------------------------------------------------------
-    print(f"\n✓ Features create: {len(feature_cols)} nuove features")
-    print(f"  (+ player_1_elo e player_2_elo dal merge = {len(feature_cols) + 2} totali)")
-    print(f"  Categorie ottimizzate:")
-    print(f"    • Ranking: elo_diff (1)")
-    print(f"    • Win Rate: last5 per P1 e P2 (2)")
-    print(f"    • H2H: wins + ratio (3)")
-    print(f"    • Momentum: streak (2)")
-    print(f"    • Volatilità: form consistency (2)")
-    print(f"\n  Features RIMOSSE per ottimizzazione:")
-    print(f"    ✗ elo_sum (correlazione 0.01)")
-    print(f"    ✗ win_rate_overall (VIF 17)")
-    print(f"    ✗ recent_form (VIF 15)")
-    print(f"    ✗ experience (correlazione 0.02)")
+    print(f"\n✓ Features create con successo: {len(feature_cols)} variabili predittive")
+    print(f"  (+ ELO dei singoli giocatori mantenuti dal merge)")
+    print(f"\n  Categorie estratte:")
+    print(f"    • Ranking: Differenza matematica (1)")
+    print(f"    • Win Rate: Forma % sulle ultime 5 partite (2)")
+    print(f"    • Head-to-Head: Scontri diretti e ratio di dominanza (3)")
+    print(f"    • Momentum: Strisce di risultati consecutivi (2)")
+    print(f"    • Volatilità: Consistenza delle performance (2)")
     
     return df
