@@ -89,3 +89,7 @@ L'efficacia del sistema è stata misurata rispetto a una soglia statistica di ri
 2. Creare un ambiente virtuale e installare le librerie:
    ```bash
    pip install -r requirements.txt
+3. Training modelli e Valutazione:
+	python main.py
+4. Effettuare una predizione testando il modello con giocatori reali:
+	python predict_match.py
