@@ -47,27 +47,25 @@ def normalize_and_merge(matches_dataset, ranking_dataset):
     Applica la normalizzazione a entrambi i dataset ed esegue una LEFT JOIN
     per associare il rating ELO a ciascun giocatore dello storico partite.
     """
-    print("\n" + "=" * 80)
-    print("FASE 2: NORMALIZZAZIONE NOMI E MERGE DATASET")
-    print("=" * 80)
+    # Rimosso il print ridondante dell'intestazione (se ne occupa main.py)
     
     # -------------------------------------------------------------------------
     # Step 1: Normalizzazione delle colonne chiave
     # -------------------------------------------------------------------------
-    print("\nSTEP 1: Pulizia e standardizzazione dei nomi...")
+    print("\n   -> STEP 1: Pulizia e standardizzazione dei nomi...")
     matches_dataset['player_1_clean'] = matches_dataset['player_1'].apply(normalize_player_name)
     matches_dataset['player_2_clean'] = matches_dataset['player_2'].apply(normalize_player_name)
     ranking_dataset['normalized_name'] = ranking_dataset['Nome Giocatore'].apply(normalize_player_name)
-    print("   ✓ Normalizzazione completata")
+    print("      ✓ Normalizzazione completata")
     
     # -------------------------------------------------------------------------
     # Step 2: Risoluzione Duplicati nel Ranking
     # -------------------------------------------------------------------------
     # Per evitare di moltiplicare le righe durante la JOIN a causa di omonimie 
     # o doppi inserimenti nel ranking ufficiale, forziamo l'univocità.
-    print("\nSTEP 2: Controllo e risoluzione duplicati nel ranking...")
+    print("\n   -> STEP 2: Controllo e risoluzione duplicati nel ranking...")
     duplicate_count = ranking_dataset['normalized_name'].duplicated().sum()
-    print(f"   Anomalie (Giocatori duplicati trovati): {duplicate_count}")
+    print(f"      ✓ Anomalie (giocatori duplicati) risolte: {duplicate_count}")
     
     # In caso di duplicato, manteniamo il record con il Rating ELO più alto
     ranking_clean_dataset = (ranking_dataset
@@ -77,7 +75,7 @@ def normalize_and_merge(matches_dataset, ranking_dataset):
     # -------------------------------------------------------------------------
     # Step 3: Merge (LEFT JOIN sequenziale)
     # -------------------------------------------------------------------------
-    print("\nSTEP 3: Esecuzione LEFT JOIN (Associazione ELO)...")
+    print("\n   -> STEP 3: Esecuzione LEFT JOIN (Associazione ELO)...")
     
     # Associazione ELO per il Player 1
     merged_dataset = matches_dataset.merge(
@@ -104,9 +102,9 @@ def normalize_and_merge(matches_dataset, ranking_dataset):
     matches_with_both_elos = ((merged_dataset['player_1_elo'].notna()) & 
                               (merged_dataset['player_2_elo'].notna())).sum()
     
-    print(f"\n✓ Operazione di Merge completata con successo!")
-    print(f"   Copertura ELO Player 1 : {p1_found_count}/{total_matches} ({p1_found_count/total_matches*100:.1f}%)")
-    print(f"   Copertura ELO Player 2 : {p2_found_count}/{total_matches} ({p2_found_count/total_matches*100:.1f}%)")
-    print(f"   Match validi (Entrambi): {matches_with_both_elos}/{total_matches} ({matches_with_both_elos/total_matches*100:.1f}%)")
+    print(f"      ✓ Operazione di Merge completata con successo!")
+    print(f"        Copertura ELO Player 1 : {p1_found_count}/{total_matches} ({p1_found_count/total_matches*100:.1f}%)")
+    print(f"        Copertura ELO Player 2 : {p2_found_count}/{total_matches} ({p2_found_count/total_matches*100:.1f}%)")
+    print(f"        Match validi (Entrambi): {matches_with_both_elos}/{total_matches} ({matches_with_both_elos/total_matches*100:.1f}%)")
     
     return merged_dataset

@@ -1,95 +1,134 @@
-# 🏓 Analisi Predittiva Match Tennis Tavolo (TT Elite Series)
+# 🏓 Table Tennis Match Prediction (TT Elite Series)
 
-Studente: Alessandro Sollevanti  
-Corso: Machine Learning  
-Data: Gennaio 2026
-
----
-
-## 📝 Panoramica del Progetto
-L'obiettivo di questo lavoro è lo sviluppo di un sistema di intelligenza artificiale capace di prevedere l'esito di un incontro di tennis tavolo prima dell'inizio del match.
-
-Il cuore del progetto risiede nella trasformazione di dati storici grezzi in **indicatori statistici dinamici**. A differenza dei modelli basati solo sulla classifica statica, questo sistema analizza lo stato di forma recente, la tenuta psicologica (**momentum**) e la consistenza delle performance degli atleti, garantendo una capacità predittiva superiore alla semplice probabilità calcolata sul Ranking ELO.
+**Autore:** Alessandro Sollevanti  
+**Corso:** Ingegneria Informatica - Machine Learning  
+**Data:** Gennaio 2026  
 
 ---
 
-## I Dataset
-Il sistema integra ed elabora due fonti di dati principali:
+## OBIETTIVO DEL PROGETTO:
+Questo progetto sviluppa un modello di Machine Learning per predire il vincitore di partite di tennis tavolo (circuito TT Elite Series) prima dell'inizio del match, 
+utilizzando i dati storici dei giocatori come il divario di punteggio ELO, lo stato di forma recente, l'esito degli scontri diretti e il 
+momentum (le serie di vittorie o sconfitte di fila).
 
-* **Match History** (`TT_Elite_COMBINED_9415_matches.csv`): Un archivio di oltre 9.000 incontri disputati nel circuito "TT Elite Series".
-* **Ranking Ufficiale** (`RANKING-TT-ELITE-SERIES.csv`): La classifica con i punteggi di oltre 400 atleti (Range ELO: 216 - 1520).
-
-**Data Cleaning:** È stata implementata una pipeline di normalizzazione testuale per gestire i caratteri speciali della lingua polacca e uniformare i formati dei nomi, garantendo un'associazione corretta tra i due dataset tramite **Left Join**.
-
----
-
-## ⚙️ Feature Engineering: Le 10 Variabili Predittive
-Per ogni match, il sistema ricostruisce il profilo statistico aggiornato dei due sfidanti utilizzando una tecnica di **Rolling Window (finestra mobile)**. 
-
-Questo approccio garantisce **Zero Data Leakage**: il calcolo delle variabili avviene considerando esclusivamente i match disputati *prima* dell'incontro oggetto di predizione. In particolare, il sistema analizza l'intera storia pregressa per gli scontri diretti e si focalizza sugli ultimi 5 incontri per determinare lo stato di forma recente.
-
-Le 10 variabili estratte e utilizzate per l'addestramento sono:
-
-1.  **Classifica (1 Feature)**
-    * `elo_diff`: Differenza tra il Rating ELO del Player 1 e del Player 2. Rappresenta il divario tecnico teorico.
-2.  **Stato di Forma Recente (2 Features)**
-    * `p1_win_rate_last5`: Percentuale di vittorie del Player 1 negli ultimi 5 match.
-    * `p2_win_rate_last5`: Percentuale di vittorie del Player 2 negli ultimi 5 match.
-3.  **Scontri Diretti - Head-to-Head (3 Features)**
-    * `p1_head_to_head_wins`: Vittorie totali del Player 1 contro il Player 2.
-    * `p2_head_to_head_wins`: Vittorie totali del Player 2 contro il Player 1.
-    * `p1_head_to_head_win_ratio`: Rapporto di dominanza (Vittorie P1 / Totale scontri diretti).
-4.  **Trend e Momentum (2 Features)**
-    * `p1_streak`: Serie di risultati consecutivi (positivi per vittorie, negativi per sconfitte). Indica l'inerzia psicologica attuale.
-    * `p2_streak`: Serie di risultati consecutivi del Player 2.
-5.  **Volatilità e Affidabilità (2 Features)**
-    * `p1_form_volatility`: Deviazione standard dei risultati. Indica quanto è "altalenante" il rendimento recente.
-    * `p2_form_volatility`: Deviazione standard dei risultati del Player 2.
+Per fare le predizioni, sono stati addestrati e confrontati tre diversi algoritmi di classificazione: Logistic Regression, Random Forest e Neural Network (MLP). 
+Infine, le valutazioni di questi tre algoritmi sono state unite in un quarto e ultimo modello, un Ensemble (Soft Voting Classifier), che ne calcola la media 
+probabilistica per ottenere previsioni più stabili e ridurre il margine di errore.
 
 ---
 
-## Modellazione e Strategia Ensemble
-Sono stati addestrati e validati tre modelli base con architetture differenti:
+## PIPELINE COMPLETA DEL PROGETTO:
 
-1.  **Logistic Regression**: Per modellare le relazioni lineari tra ELO e vittoria.
-2.  **Random Forest Classifier**: Per catturare interazioni non lineari e gerarchiche.
-3.  **Neural Network (MLP)**: Una rete neurale profonda per l'estrazione di pattern complessi.
+### DATA LOADING & PREPROCESSING (Fasi 1-3)
+1. **Caricamento Dataset**
+   - Import file partite (raccolta di 9415 match del torneo polacco "TT Elite Series" in una finestra temporale di un mese).
+   - Import ranking ELO ufficiale (413 giocatori, rating 216-1520).
 
-**Meta-Modello:** Per massimizzare la robustezza, è stato implementato un quarto modello: **Soft Voting Classifier**. A differenza dell'Hard Voting (basato sulla maggioranza secca), il **Soft Voting** calcola la media ponderata delle probabilità predette dai singoli modelli, dando più peso alle previsioni "più sicure" e mitigando gli errori isolati.
+2. **Preprocessing**
+   - Normalizzazione nomi (rimozione accenti e caratteri speciali per uniformità).
+   - Controllo e risoluzione automatica dei duplicati nel ranking.
+   - Merge LEFT JOIN per associare l'ELO corretto ai rispettivi giocatori.
+
+3. **Feature Engineering**
+   - Creazione di 10 variabili predittive calcolate tramite "Rolling Window".
+   - Utilizzo esclusivo dello storico antecedente al match per garantire **zero data leakage**.
+
+### EXPLORATORY DATA ANALYSIS & OUTLIER DETECTION (Fase 4)
+4. **Analisi Esplorativa + Outlier Detection**
+   - Studio del bilanciamento target, distribuzioni ELO e relazione tra differenza punteggio e probabilità di vittoria.
+   - Outlier Detection avanzata tramite algebra lineare (Studentized Residuals, Leverage e DFFITS).
+   - Rimozione dei sample anomali critici per aumentare la robustezza dei modelli.
+
+### TRAIN/TEST SPLIT & FEATURE ANALYSIS (Fasi 5-6)
+5. **Split Temporale**
+   - Divisione 80/20 eseguita rigorosamente in ordine cronologico (Train sul passato, Test sul futuro).
+   - Test set "congelato" in cassaforte fino alla valutazione finale.
+
+6. **Analisi Correlazioni e Multicollinearità**
+   - Esecuzione SOLO sul train set per non "inquinare" l'addestramento.
+   - Analisi Matrice di Correlazione di Pearson e VIF (Variance Inflation Factor).
+   - Rimozione preventiva delle feature ridondanti per pulire il modello predittivo.
+
+### MODELING & VALIDATION (Fasi 7-10)
+7. **Preparazione Dati**
+   - Creazione target binario e normalizzazione statistica tramite StandardScaler.
+
+8. **Training Modelli Base**
+   - Addestramento iniziale di Logistic Regression, Random Forest e Neural Network (MLP) utilizzando parametri standard per creare una baseline algoritmica.
+
+9. **Hyperparameter Tuning**
+   - Esecuzione della Grid Search su TUTTI i modelli base per esplorare diverse combinazioni di parametri e trovarne la configurazione ottimale.
+
+10. **Creazione Ensemble e Cross-Validation**
+    - Costruzione del Meta-Modello Ensemble (Soft Voting) unendo i 3 algoritmi portati al loro massimo potenziale.
+    - Valutazione robusta di tutti i modelli tramite 5-Fold CV sul Train Set per testare la generalizzazione e decretare il modello vincitore prima del test finale.
+
+### FINAL EVALUATION & DEPLOYMENT (Fasi 11-13)
+11. **Evaluation Finale su Test Set**
+    - Test set sbloccato e utilizzato per la PRIMA e UNICA volta.
+    - Valutazione ufficiale tramite Accuracy, Precision, Recall, F1-Score e Matrice di Confusione.
+
+12. **Analisi Avanzata (Visualizzazioni)**
+    - Studio delle Curve ROC (AUC) per confrontare la capacità discriminativa dei modelli.
+    - Analisi di calibrazione delle probabilità (Brier Score) per misurare l'affidabilità percentuale delle predizioni.
+    - Feature Importance per analizzare il peso decisionale delle singole variabili.
+
+13. **Salvataggio Modelli**
+    - Esportazione dei modelli addestrati e dello scaler in file .pkl. In questo modo congelo il loro stato e sono pronti per fare predizioni dal vivo usando la console interattiva, senza doverli riaddestrare ogni volta.
 
 ---
 
-## 📈 Risultati e Valutazione
-L'efficacia del sistema è stata misurata rispetto a una soglia statistica di riferimento (**Baseline Accuracy**) pari al **50.5%** (frequenza della classe maggioritaria, in questo caso vittoria player 2).
+## ⚙️ Le 10 Variabili Predittive Estratte
+Per garantire la robustezza del modello, le features create si dividono in 5 categorie logiche:
+* **Ranking (1):** `elo_diff` (Divario tecnico teorico).
+* **Forma Recente (2):** `p1_win_rate_last5`, `p2_win_rate_last5`.
+* **Scontri Diretti (3):** `p1_head_to_head_wins`, `p2_head_to_head_wins`, `p1_head_to_head_win_ratio`.
+* **Momentum Psicologico (2):** `p1_streak`, `p2_streak` (Serie ininterrotte di risultati).
+* **Affidabilità/Incostanza (2):** `p1_form_volatility`, `p2_form_volatility` (Deviazione standard dei risultati).
 
-* **Miglior Modello:** **Ensemble Voting (Soft)**.
-* **Accuratezza Finale (Test Set):** **60.5%**. Il modello prevede correttamente oltre 6 match su 10.
-* **Vantaggio sulla Baseline:** Un incremento di ben **+10%** conferma il valore informativo delle variabili dinamiche introdotte.
-* **Diagnosi Overfitting:** Gap Train-Test minimo (**0.007**), certificando un'ottima capacità di generalizzazione.
+---
 
-### Perché l'Ensemble è risultato superiore?
-* **Riduzione della Varianza:** Ha mostrato la deviazione standard più bassa nella Cross-Validation (**± 0.0075**), risultando il più solido ai cambi di dataset.
-* **Compensazione degli Errori:** La mediazione tra modelli lineari, ad albero e neurali permette di bilanciare i "bias" individuali di ogni algoritmo.
-* **Stabilità Statistica:** Ha mitigato il rumore dei singoli modelli, producendo una decisione finale più robusta.
+## 📈 Risultati Principali
+
+* **Baseline Statistica (Caso):** 50.5%
+* **Miglior Modello:** Ensemble Voting (Soft)
+* **Accuratezza Finale (Test Set):** **60.5%**
+* **Vantaggio Competitivo (Edge):** **+10.0%** rispetto alla baseline. Nelle scommesse sportive, questo margine certifica l'alto valore informativo delle variabili dinamiche introdotte.
+* **Generalizzazione:** Gap tra Train (CV) e Test pari a 0.007, certificando l'assoluta assenza di Overfitting.
 
 ---
 
 ## 📂 Struttura del Repository
-* `main.py`: Script principale (Preprocessing -> EDA -> Training -> Evaluation).
-* `predict_match.py`: Interfaccia interattiva per simulazioni in tempo reale.
-* `src/`: Moduli per la logica di caricamento, ingegnerizzazione e analisi.
-* `plots/`: Grafici generati (ROC Curves, Confusion Matrices, Feature Importance).
+
+* `main.py`: Script principale che esegue l'intera pipeline end-to-end.
+* `predict_match.py`: Interfaccia interattiva per simulazioni e predizioni dal vivo.
+* `src/`: Cartella contenente i moduli core per la logica del progetto:
+  * `data_loader.py`: Gestisce l'acquisizione dei dati grezzi e il caricamento dei CSV in DataFrame Pandas.
+  * `preprocessing.py`: Si occupa della pulizia testuale, risoluzione duplicati e del merge (Left Join) tra match e ranking ELO.
+  * `feature_engineering.py`: Implementa il calcolo delle 10 variabili dinamiche tramite rolling window, garantendo il paradigma "zero data leakage".
+  * `exploratory_analysis.py`: Gestisce l'EDA, il bilanciamento classi, i plot delle distribuzioni ELO e l'outlier detection di base (IQR).
+  * `advanced_analysis.py`: Esegue l'outlier detection avanzata tramite algebra lineare (Residui Studentizzati, Leverage, DFFITS).
+  * `modeling.py`: Orchestra lo split temporale, lo scaling, il training dei tre modelli base, l'Hyperparameter Tuning (GridSearch) e la costruzione dell'Ensemble Soft Voting.
+  * `evaluation.py`: Valuta i modelli sul test set calcolando metriche (Accuracy, F1), generando Matrici di Confusione, Curve ROC e grafici di calibrazione (Brier Score).
+* `plots/`: Grafici generati in automatico (ROC Curves, Confusion Matrices, EDA).
 * `models/`: Modelli addestrati serializzati in formato `.pkl`.
-* `requirements.txt`: Elenco delle dipendenze necessarie.
+* `datasets/`: File CSV contenenti storico match e ranking.
+* `requirements.txt`: Elenco delle librerie Python necessarie per l'esecuzione.
 
 ---
 
 ## 🚀 Installazione ed Esecuzione
-1. Clonare il repository.
-2. Creare un ambiente virtuale e installare le librerie:
+
+1. Clonare il repository e spostarsi nella cartella:
    ```bash
-   pip install -r requirements.txt
-3. Training modelli e Valutazione:
-	python main.py
+   git clone [https://github.com/tuo-username/Table_Tennis_Match_Prediction.git](https://github.com/tuo-username/Table_Tennis_Match_Prediction.git)
+   cd Table_Tennis_Match_Prediction
+
+2. Installare le librerie necessarie:
+    pip install -r requirements.txt
+
+3. Avviare l'addestramento e la valutazione:
+    python main.py
+
 4. Effettuare una predizione testando il modello con giocatori reali:
-	python predict_match.py
+    python predict_match.py
